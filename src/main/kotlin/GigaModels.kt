@@ -1,5 +1,14 @@
 import kotlinx.serialization.Serializable
 
+// Моделька для второго урока
+@Serializable
+data class AIChallengeResponse(
+    val datetime: String,
+    val model: String,
+    val question: String,
+    val answer: String
+)
+
 @Serializable
 data class GigaChatMessage(
     val role: String,

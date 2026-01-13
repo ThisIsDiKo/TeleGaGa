@@ -95,4 +95,5 @@ fun main() {
 
 @Suppress("unused")
 fun Application.module() {
+
 }
