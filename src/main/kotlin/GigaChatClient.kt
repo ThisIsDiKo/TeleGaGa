@@ -64,10 +64,11 @@ class GigaChatClient(
         }
 
         val parsed: GigaChatChatResponse = json.decodeFromString(bodyText)
-        //return parsed.choices.firstOrNull()?.message?.content ?: ""
-        val firstResponse = parsed.choices.firstOrNull()?.message?.content ?: throw IllegalStateException("No Response")
-        val aiResponse: AIChallengeResponse = json.decodeFromString(firstResponse)
-        return "Raw Answer:\n$firstResponse \n \nPrepared Json:\n$aiResponse"
+        return parsed.choices.firstOrNull()?.message?.content ?: ""
+
+        //val firstResponse = parsed.choices.firstOrNull()?.message?.content ?: throw IllegalStateException("No Response")
+        //val aiResponse: AIChallengeResponse = json.decodeFromString(firstResponse)
+        //return "Raw Answer:\n$firstResponse \n \nPrepared Json:\n$aiResponse"
     }
 
     private suspend fun getOrRequestToken(): String {

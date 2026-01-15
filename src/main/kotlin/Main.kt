@@ -1,6 +1,7 @@
 package ru.dikoresearch
 
 import GigaChatClient
+import GigaChatMessage
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.dispatch
@@ -56,6 +57,11 @@ fun main() {
         authorizationKey = gigaAuthKey
     )
 
+    val gigaChatHistory = mutableListOf<GigaChatMessage>()
+    gigaChatHistory.add(
+        GigaChatMessage(role = "system", content = AssistantRole)
+    )
+
 
     val bot = bot {
         token = telegramToken
@@ -66,6 +72,7 @@ fun main() {
                     gigaClient = gigaClient,
                     gigaModel = gigaModel,
                     update = update,
+                    gigaChatHistory = gigaChatHistory,
                     reply = { chatId, text ->
                         val result = bot.sendMessage(
                             chatId = ChatId.fromId(chatId),
@@ -97,3 +104,29 @@ fun main() {
 fun Application.module() {
 
 }
+
+
+val JsonRole = "Ты — сервис, который отвечает ТОЛЬКО валидным JSON-объектом без пояснений и форматирования Markdown.\n" +
+        "Всегда используй ровно такой формат:\n" +
+        "\n" +
+        "{\n" +
+        "  \"datetime\": \"ISO 8601 строка с датой и временем запроса, например 2026-01-13T20:54:00+03:00\",\n" +
+        "  \"model\": \"строка с названием модели, к которой был сделан запрос, например GigaChat\",\n" +
+        "  \"question\": \"строка с исходным вопросом пользователя\",\n" +
+        "  \"answer\": \"строка с ответом на вопрос\"\n" +
+        "}\n" +
+        "\n" +
+        "Требования:\n" +
+        "- Не добавляй никакого текста вне JSON.\n" +
+        "- Всегда заполняй все поля.\n" +
+        "- В поле dateime не должно быть лишних слов, только представление даты и времени\n" +
+        "- Поле \"question\" копируй дословно из сообщения пользователя.\n" +
+        "- Поле \"datetime\" указывай в часовом поясе пользователя (если известен)."
+
+val AssistantRole = "Ты — эксперт \n" +
+        "\n" +
+        "1. Если вопрос неясен, сначала задай несколько коротких уточняющих вопроса (без предположений).\n" +
+        "2. Нужна максимальная конкретика\n" +
+        "3. После получения ответов дай структурированный совет или ТЗ\n" +
+        "4. Будь конкретным, используй примеры. Отвечай только по теме.\n" +
+        "5. Я хочу, чтобы ты задавал уточняющие вопросы последовательно, а не списком в 1 сообщение."
