@@ -2,10 +2,14 @@ package ru.dikoresearch
 
 import GigaChatClient
 import GigaChatMessage
+import OllamaClient
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.entities.ChatId
 import com.github.kotlintelegrambot.dispatch
+import com.github.kotlintelegrambot.dispatcher.command
+import com.github.kotlintelegrambot.dispatcher.message
 import com.github.kotlintelegrambot.dispatcher.text
+import com.github.kotlintelegrambot.extensions.filters.Filter
 import handleTextUpdate
 
 import io.ktor.client.*
@@ -57,22 +61,66 @@ fun main() {
         authorizationKey = gigaAuthKey
     )
 
+    val ollamaClient = OllamaClient(
+        httpClient = httpClient,
+    )
+
     val gigaChatHistory = mutableListOf<GigaChatMessage>()
     gigaChatHistory.add(
-        GigaChatMessage(role = "system", content = AssistantRole)
+        GigaChatMessage(role = "system", content = SingleRole)
     )
+
+    val modelTemperature = 0.87F
 
 
     val bot = bot {
         token = telegramToken
 
         dispatch {
-            text {
+            command("start") {
+
+            }
+            command("changeRole") {
+                val joinedArgs = args.joinToString(separator = " ")
+                val response = if (joinedArgs.isNotBlank()) joinedArgs else return@command
+                println("Got response from changeSystemPromt $response")
+                val newSystemPromt = response
+
+                gigaChatHistory[0] = GigaChatMessage(role = "system", content = newSystemPromt)
+
+                bot.sendMessage(
+                    chatId = ChatId.fromId(message.chat.id),
+                    text = "Изменил системный промнт на $newSystemPromt"
+                )
+            }
+            command("changeT") {
+                val joinedArgs = args.joinToString(separator = " ")
+
+                val newTemperature = try {
+                    joinedArgs.toFloat()
+                }
+                catch (e: Exception){
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(message.chat.id),
+                        text = "Температура может быть указана только числом"
+                    )
+                    return@command
+                }
+
+                println("Новая температура ответов: $newTemperature")
+                bot.sendMessage(
+                    chatId = ChatId.fromId(message.chat.id),
+                    text = "Новая температура ответов: $newTemperature"
+                )
+            }
+            message(filter = Filter.Text) {
                 handleTextUpdate(
                     gigaClient = gigaClient,
+                    ollamaClient = ollamaClient,
                     gigaModel = gigaModel,
                     update = update,
                     gigaChatHistory = gigaChatHistory,
+                    temperature = modelTemperature,
                     reply = { chatId, text ->
                         val result = bot.sendMessage(
                             chatId = ChatId.fromId(chatId),
@@ -130,3 +178,5 @@ val AssistantRole = "Ты — эксперт \n" +
         "3. После получения ответов дай структурированный совет или ТЗ\n" +
         "4. Будь конкретным, используй примеры. Отвечай только по теме.\n" +
         "5. Я хочу, чтобы ты задавал уточняющие вопросы последовательно, а не списком в 1 сообщение."
+
+val SingleRole = "You are very smart assistant"

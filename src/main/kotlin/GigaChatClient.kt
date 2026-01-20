@@ -26,15 +26,19 @@ class GigaChatClient(
     private var currentToken: String? = null
     suspend fun chatCompletion(
         model: String,
-        messages: List<GigaChatMessage>
-    ): String {
+        messages: List<GigaChatMessage>,
+        temperature: Float
+    ): GigaChatResponse {
         return callWithTokenRetry { token ->
             val rqUID = UUID.randomUUID().toString()
 
             val requestBody = GigaChatChatRequest(
                 model = model,
-                messages = messages
+                messages = messages,
+                temperature = temperature
             )
+
+            println(requestBody)
 
             httpClient.post("$baseUrl/api/v1/chat/completions") {
                 contentType(ContentType.Application.Json)
@@ -47,7 +51,7 @@ class GigaChatClient(
 
     private suspend fun callWithTokenRetry(
         requestBlock: suspend (token: String) -> HttpResponse
-    ): String {
+    ): GigaChatResponse {
         var token = getOrRequestToken()
 
         var response = requestBlock(token)
@@ -58,17 +62,21 @@ class GigaChatClient(
             response = requestBlock(token)
         }
 
+        println(response.bodyAsText())
+
         val bodyText = response.bodyAsText()
         if (!response.status.isSuccess()) {
             throw IllegalStateException("GigaChat error: ${response.status}: $bodyText")
         }
 
-        val parsed: GigaChatChatResponse = json.decodeFromString(bodyText)
-        return parsed.choices.firstOrNull()?.message?.content ?: ""
+        //val parsed: GigaChatChatResponse = json.decodeFromString(bodyText)
 
-        //val firstResponse = parsed.choices.firstOrNull()?.message?.content ?: throw IllegalStateException("No Response")
-        //val aiResponse: AIChallengeResponse = json.decodeFromString(firstResponse)
-        //return "Raw Answer:\n$firstResponse \n \nPrepared Json:\n$aiResponse"
+        val parsed: GigaChatResponse = json.decodeFromString(bodyText)
+        println("Gigachat json parsed : $parsed")
+
+        //return parsed.choices.firstOrNull()?.message?.content ?: ""
+        return parsed
+
     }
 
     private suspend fun getOrRequestToken(): String {
