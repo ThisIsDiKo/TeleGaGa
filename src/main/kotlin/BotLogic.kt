@@ -7,11 +7,24 @@ suspend fun handleTextUpdate(
     update: Update,
     gigaChatHistory: MutableList<GigaChatMessage>,
     temperature: Float,
+    destroy: Boolean = false,
     reply: (chatId: Long, text: String) -> Unit
 ) {
     val message = update.message ?: return
     val chatId = message.chat.id
-    val text = message.text ?: return
+    //val text = message.text ?: return
+
+    val text = if (destroy){
+        println("We will break context now")
+        //Чтобы сломать контекст модели, нам нужно отправить 128к токенов
+        //Ниже код, который получен эмпирическим путем
+        //После получения такого запроса, Gigachat присылает ответ с ошибкой 422
+        val filler = "Подробное описание датчика давления в пневмосистеме ESP32-C6. "
+        filler.repeat(10000)
+    }
+    else {
+        message.text ?: return
+    }
 
     gigaChatHistory.add(GigaChatMessage(role = "user", content = text))
 
@@ -27,11 +40,22 @@ suspend fun handleTextUpdate(
 
         //gigaChatHistory.add(GigaChatMessage(role = "assistant", content = modelAnswer))
 
+        //Обрезаем текст, так как проект учебный, а обходить ограничения телеграмма пока не хочется.
+        val preparedText = modelAnswer.choices.firstOrNull()?.message?.content ?: ""
+        val tText = if (preparedText.length > 3800){
+            preparedText.substring(0, 3799) + "..."
+        }
+        else {
+            preparedText
+        }
+
         val g = buildString {
             appendLine("*** Gigachat T = $temperature ***")
-            append(modelAnswer.choices.firstOrNull()?.message?.content ?: "")
-            appendLine("\nTotal time: Нет данных")
-            appendLine("Tokens: ${modelAnswer.usage.totalTokens}")
+            append(tText)
+
+            appendLine("\n\nОтправлены токены: ${modelAnswer.usage.promptTokens}")
+            appendLine("Получены токены: ${modelAnswer.usage.completionTokens}")
+            appendLine("Оплачены токены ${modelAnswer.usage.totalTokens}")
         }
 
         g
@@ -43,6 +67,8 @@ suspend fun handleTextUpdate(
 
     reply(chatId, gigaChatAnswer.ifBlank { "Пустой ответ от модели" })
 
+    // отключим возможность опроса OLLAMA
+    /*
     val ollamaAnswer  = try {
 
         val modelAnswer = ollamaClient.chatCompletion(
@@ -63,11 +89,11 @@ suspend fun handleTextUpdate(
         "Ошибка при обращении к Ollama LLM"
     }
 
-    gigaChatHistory.removeLast()
+
 
 
     reply(chatId, ollamaAnswer.ifBlank { "Пустой ответ от модели" })
-
-
+    */
+    gigaChatHistory.removeLast()
 }
 

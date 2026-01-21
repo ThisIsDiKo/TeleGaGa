@@ -80,6 +80,32 @@ fun main() {
             command("start") {
 
             }
+            command("destroyContext"){
+
+                bot.sendMessage(
+                    chatId = ChatId.fromId(message.chat.id),
+                    text = "Отправляю примерно 160к токенов (максимум заявлен в 128к)"
+                )
+
+                handleTextUpdate(
+                    gigaClient = gigaClient,
+                    ollamaClient = ollamaClient,
+                    gigaModel = gigaModel,
+                    update = update,
+                    gigaChatHistory = gigaChatHistory,
+                    temperature = modelTemperature,
+                    destroy = true,
+                    reply = { chatId, text ->
+                        val result = bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = text
+                        )
+                        result.fold({}, { error ->
+                            println("Telegram sendMessage error: $error")
+                        })
+                    }
+                )
+            }
             command("changeRole") {
                 val joinedArgs = args.joinToString(separator = " ")
                 val response = if (joinedArgs.isNotBlank()) joinedArgs else return@command
@@ -179,4 +205,4 @@ val AssistantRole = "Ты — эксперт \n" +
         "4. Будь конкретным, используй примеры. Отвечай только по теме.\n" +
         "5. Я хочу, чтобы ты задавал уточняющие вопросы последовательно, а не списком в 1 сообщение."
 
-val SingleRole = "You are very smart assistant"
+val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32"
