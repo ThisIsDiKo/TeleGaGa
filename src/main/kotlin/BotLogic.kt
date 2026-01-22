@@ -1,6 +1,7 @@
 import com.github.kotlintelegrambot.entities.Update
 
 suspend fun handleTextUpdate(
+    systemRole: String,
     gigaClient: GigaChatClient,
     ollamaClient: OllamaClient,
     gigaModel: String,
@@ -36,14 +37,15 @@ suspend fun handleTextUpdate(
             temperature = temperature
         )
 
+        val preparedText = modelAnswer.choices.firstOrNull()?.message?.content ?: ""
+
         //Удалим возможность запоминаня контекста
 
-        //gigaChatHistory.add(GigaChatMessage(role = "assistant", content = modelAnswer))
+        gigaChatHistory.add(GigaChatMessage(role = "assistant", content = preparedText))
 
         //Обрезаем текст, так как проект учебный, а обходить ограничения телеграмма пока не хочется.
-        val preparedText = modelAnswer.choices.firstOrNull()?.message?.content ?: ""
         val tText = if (preparedText.length > 3800){
-            preparedText.substring(0, 3799) + "..."
+            preparedText.take(3799) + "..."
         }
         else {
             preparedText
@@ -67,33 +69,43 @@ suspend fun handleTextUpdate(
 
     reply(chatId, gigaChatAnswer.ifBlank { "Пустой ответ от модели" })
 
-    // отключим возможность опроса OLLAMA
-    /*
-    val ollamaAnswer  = try {
+    if (gigaChatHistory.size > 20){
+        println("Запускаем процесс суммаризации")
+        reply(chatId, "Диалог из 10 сообщений, запускаю сумамризацию")
 
-        val modelAnswer = ollamaClient.chatCompletion(
-            messages = gigaChatHistory,
+        val summarySystemPrompt = GigaChatMessage(
+            role = "system",
+            content = "Ты - мастер пересказа. Кратко (до 3000 символов) опиши суть этого диалога, только факты без воды. Без примеров кода"
         )
 
-        val o = buildString {
-            appendLine("*** Llama3.2:1b  ***")
-            append(modelAnswer.message.content)
-            appendLine("\nTotal time: ${modelAnswer.total_duration}")
-            appendLine("Tokens: ${modelAnswer.eval_count}")
+        val summaryUserPrompt = GigaChatMessage(
+            role = "user",
+            content = gigaChatHistory.joinToString("\n"){"${it.role}: ${it.content}"}
+        )
+
+        val summaryRequest = listOf(summarySystemPrompt, summaryUserPrompt)
+
+        val modelAnswer = gigaClient.chatCompletion(
+            model = gigaModel,
+            messages = summaryRequest,
+            temperature = 0.0F
+        )
+
+        val chatSummary = modelAnswer.choices.firstOrNull()?.message?.content ?: ""
+        println("Got summary: $chatSummary")
+
+        reply(chatId, "Получили описание диалога:\n$chatSummary")
+
+        val newSystemMessage = buildString {
+            appendLine(systemRole)
+            appendLine("Предыдущий контекст:")
+            appendLine(chatSummary)
         }
 
-        o
+        val newSystemPromt= GigaChatMessage(role = "system", content = newSystemMessage)
 
-    } catch (e: Exception) {
-        println("Ollama error: ${e}")
-        "Ошибка при обращении к Ollama LLM"
+        gigaChatHistory.clear()
+        gigaChatHistory.add(0, newSystemPromt)
     }
-
-
-
-
-    reply(chatId, ollamaAnswer.ifBlank { "Пустой ответ от модели" })
-    */
-    gigaChatHistory.removeLast()
 }
 

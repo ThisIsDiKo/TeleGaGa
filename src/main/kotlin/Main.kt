@@ -84,26 +84,7 @@ fun main() {
 
                 bot.sendMessage(
                     chatId = ChatId.fromId(message.chat.id),
-                    text = "Отправляю примерно 160к токенов (максимум заявлен в 128к)"
-                )
-
-                handleTextUpdate(
-                    gigaClient = gigaClient,
-                    ollamaClient = ollamaClient,
-                    gigaModel = gigaModel,
-                    update = update,
-                    gigaChatHistory = gigaChatHistory,
-                    temperature = modelTemperature,
-                    destroy = true,
-                    reply = { chatId, text ->
-                        val result = bot.sendMessage(
-                            chatId = ChatId.fromId(chatId),
-                            text = text
-                        )
-                        result.fold({}, { error ->
-                            println("Telegram sendMessage error: $error")
-                        })
-                    }
+                    text = "Раньше я отправлял примерно 160к токенов (максимум заявлен в 128к)"
                 )
             }
             command("changeRole") {
@@ -141,6 +122,7 @@ fun main() {
             }
             message(filter = Filter.Text) {
                 handleTextUpdate(
+                    systemRole = SingleRole,
                     gigaClient = gigaClient,
                     ollamaClient = ollamaClient,
                     gigaModel = gigaModel,
@@ -205,4 +187,4 @@ val AssistantRole = "Ты — эксперт \n" +
         "4. Будь конкретным, используй примеры. Отвечай только по теме.\n" +
         "5. Я хочу, чтобы ты задавал уточняющие вопросы последовательно, а не списком в 1 сообщение."
 
-val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32"
+val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
