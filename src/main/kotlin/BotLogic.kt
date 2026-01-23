@@ -8,6 +8,7 @@ suspend fun handleTextUpdate(
     update: Update,
     gigaChatHistory: MutableList<GigaChatMessage>,
     temperature: Float,
+    historyManager: ChatHistoryManager,
     destroy: Boolean = false,
     reply: (chatId: Long, text: String) -> Unit
 ) {
@@ -69,6 +70,9 @@ suspend fun handleTextUpdate(
 
     reply(chatId, gigaChatAnswer.ifBlank { "Пустой ответ от модели" })
 
+    // Сохраняем историю после получения ответа от модели
+    historyManager.saveHistory(chatId, gigaChatHistory)
+
     if (gigaChatHistory.size > 20){
         println("Запускаем процесс суммаризации")
         reply(chatId, "Диалог из 10 сообщений, запускаю сумамризацию")
@@ -106,6 +110,9 @@ suspend fun handleTextUpdate(
 
         gigaChatHistory.clear()
         gigaChatHistory.add(0, newSystemPromt)
+
+        // Сохраняем обновленную историю после суммаризации
+        historyManager.saveHistory(chatId, gigaChatHistory)
     }
 }
 

@@ -1,5 +1,6 @@
 package ru.dikoresearch
 
+import ChatHistoryManager
 import GigaChatClient
 import GigaChatMessage
 import OllamaClient
@@ -65,10 +66,11 @@ fun main() {
         httpClient = httpClient,
     )
 
-    val gigaChatHistory = mutableListOf<GigaChatMessage>()
-    gigaChatHistory.add(
-        GigaChatMessage(role = "system", content = SingleRole)
-    )
+    // Инициализируем менеджер истории чатов
+    val historyManager = ChatHistoryManager()
+
+    // Хранилище истории для каждого чата (chatId -> история)
+    val chatHistories = mutableMapOf<Long, MutableList<GigaChatMessage>>()
 
     val modelTemperature = 0.87F
 
@@ -88,15 +90,24 @@ fun main() {
                 )
             }
             command("changeRole") {
+                val chatId = message.chat.id
                 val joinedArgs = args.joinToString(separator = " ")
                 val response = if (joinedArgs.isNotBlank()) joinedArgs else return@command
                 println("Got response from changeSystemPromt $response")
                 val newSystemPromt = response
 
-                gigaChatHistory[0] = GigaChatMessage(role = "system", content = newSystemPromt)
+                // Получаем или создаем историю для текущего чата
+                val history = chatHistories.getOrPut(chatId) {
+                    historyManager.loadHistory(chatId).takeIf { it.isNotEmpty() }
+                        ?: mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
+                }
+
+                // Обновляем системный промпт
+                history[0] = GigaChatMessage(role = "system", content = newSystemPromt)
+                historyManager.saveHistory(chatId, history)
 
                 bot.sendMessage(
-                    chatId = ChatId.fromId(message.chat.id),
+                    chatId = ChatId.fromId(chatId),
                     text = "Изменил системный промнт на $newSystemPromt"
                 )
             }
@@ -120,15 +131,52 @@ fun main() {
                     text = "Новая температура ответов: $newTemperature"
                 )
             }
+            command("clearChat") {
+                val chatId = message.chat.id
+
+                // Удаляем историю из файла
+                val deleted = historyManager.clearHistory(chatId)
+
+                // Удаляем историю из памяти
+                chatHistories.remove(chatId)
+
+                val responseText = if (deleted) {
+                    "История чата успешно удалена. Начинаем с чистого листа!"
+                } else {
+                    "Произошла ошибка при удалении истории чата"
+                }
+
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = responseText
+                )
+
+                println("Команда clearChat выполнена для чата $chatId: deleted=$deleted")
+            }
             message(filter = Filter.Text) {
+                val chatId = message.chat.id
+
+                // Получаем или создаем историю для текущего чата
+                val history = chatHistories.getOrPut(chatId) {
+                    val loadedHistory = historyManager.loadHistory(chatId)
+                    if (loadedHistory.isNotEmpty()) {
+                        println("Загружена существующая история для чата $chatId")
+                        loadedHistory
+                    } else {
+                        println("Создана новая история для чата $chatId")
+                        mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
+                    }
+                }
+
                 handleTextUpdate(
                     systemRole = SingleRole,
                     gigaClient = gigaClient,
                     ollamaClient = ollamaClient,
                     gigaModel = gigaModel,
                     update = update,
-                    gigaChatHistory = gigaChatHistory,
+                    gigaChatHistory = history,
                     temperature = modelTemperature,
+                    historyManager = historyManager,
                     reply = { chatId, text ->
                         val result = bot.sendMessage(
                             chatId = ChatId.fromId(chatId),
