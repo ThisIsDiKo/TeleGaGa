@@ -26,6 +26,8 @@ dependencies {
 
     // Telegram Bot
     implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.1.0")
+
+    implementation("io.modelcontextprotocol:kotlin-sdk:0.8.3")
 }
 
 application {

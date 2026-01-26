@@ -23,185 +23,241 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.modelcontextprotocol.kotlin.sdk.client.Client
+import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
+import io.modelcontextprotocol.kotlin.sdk.types.Implementation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.io.Sink
+import kotlinx.io.Source
+import kotlinx.io.asSink
+import kotlinx.io.asSource
+import kotlinx.io.buffered
 import kotlinx.serialization.json.Json
 import java.lang.IllegalStateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
 
-fun main() {
-    val json = Json { ignoreUnknownKeys = true }
+suspend fun main() = run {
+    var process: Process? = null
 
-    val httpClient = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(json)
-        }
-        install(Logging) {
-        }
+    try {
+        val json = Json { ignoreUnknownKeys = true }
 
-        // Из-за проблем с сертификатами минцифры, пришлось отключить их проверку.
-        engine {
-            https {
-                trustManager = object : X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        val httpClient = HttpClient(CIO) {
+            install(ContentNegotiation) {
+                json(json)
+            }
+            install(Logging) {
+            }
+
+            // Из-за проблем с сертификатами минцифры, пришлось отключить их проверку.
+            engine {
+                https {
+                    trustManager = object : X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+                    }
                 }
             }
+
         }
 
-    }
+        val telegramToken = "" ?: throw IllegalStateException("Telegram bot key is empty")
+        val gigaBaseUrl = "https://gigachat.devices.sberbank.ru"
+        val gigaAuthKey = "" ?: throw IllegalStateException("GigaChat key is empty")
+        val gigaModel = "GigaChat"
 
-    val telegramToken = "" ?: throw IllegalStateException("Telegram bot key is empty")
-    val gigaBaseUrl = "https://gigachat.devices.sberbank.ru"
-    val gigaAuthKey = "" ?: throw IllegalStateException("GigaChat key is empty")
-    val gigaModel = "GigaChat"
+        val gigaClient = GigaChatClient(
+            httpClient = httpClient,
+            baseUrl = gigaBaseUrl,
+            authorizationKey = gigaAuthKey
+        )
 
-    val gigaClient = GigaChatClient(
-        httpClient = httpClient,
-        baseUrl = gigaBaseUrl,
-        authorizationKey = gigaAuthKey
-    )
+        val ollamaClient = OllamaClient(
+            httpClient = httpClient,
+        )
 
-    val ollamaClient = OllamaClient(
-        httpClient = httpClient,
-    )
+        // Инициализируем менеджер истории чатов
+        val historyManager = ChatHistoryManager()
 
-    // Инициализируем менеджер истории чатов
-    val historyManager = ChatHistoryManager()
+        // Хранилище истории для каждого чата (chatId -> история)
+        val chatHistories = mutableMapOf<Long, MutableList<GigaChatMessage>>()
 
-    // Хранилище истории для каждого чата (chatId -> история)
-    val chatHistories = mutableMapOf<Long, MutableList<GigaChatMessage>>()
+        val modelTemperature = 0.87F
+        process = ProcessBuilder(
+            "npx", "-y", "@modelcontextprotocol/server-everything"
+        ).start()
+        val inputStream = process.inputStream.asSource().buffered()
+        val outputStream = process.outputStream.asSink().buffered()
 
-    val modelTemperature = 0.87F
 
 
-    val bot = bot {
-        token = telegramToken
+        val mcpClient = Client(
+            clientInfo = Implementation(
+                name = "my-kotlin-app",
+                version = "1.0.0"
+            )
+        )
 
-        dispatch {
-            command("start") {
+        val transport = StdioClientTransport(
+            input = inputStream,
+            output = outputStream
+        ) // URL вашего MCP-сервера
 
-            }
-            command("destroyContext"){
+        // Connect to server
+        mcpClient.connect(transport)
+        println("Сервер подключен")
+        val mcpTools = mcpClient.listTools()
+        println("Инструменты: ${mcpTools.tools.map { it.name }}")
 
-                bot.sendMessage(
-                    chatId = ChatId.fromId(message.chat.id),
-                    text = "Раньше я отправлял примерно 160к токенов (максимум заявлен в 128к)"
-                )
-            }
-            command("changeRole") {
-                val chatId = message.chat.id
-                val joinedArgs = args.joinToString(separator = " ")
-                val response = if (joinedArgs.isNotBlank()) joinedArgs else return@command
-                println("Got response from changeSystemPromt $response")
-                val newSystemPromt = response
+        val bot = bot {
+            token = telegramToken
 
-                // Получаем или создаем историю для текущего чата
-                val history = chatHistories.getOrPut(chatId) {
-                    historyManager.loadHistory(chatId).takeIf { it.isNotEmpty() }
-                        ?: mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
+
+            dispatch {
+                command("start") {
+
                 }
+                command("destroyContext"){
 
-                // Обновляем системный промпт
-                history[0] = GigaChatMessage(role = "system", content = newSystemPromt)
-                historyManager.saveHistory(chatId, history)
-
-                bot.sendMessage(
-                    chatId = ChatId.fromId(chatId),
-                    text = "Изменил системный промнт на $newSystemPromt"
-                )
-            }
-            command("changeT") {
-                val joinedArgs = args.joinToString(separator = " ")
-
-                val newTemperature = try {
-                    joinedArgs.toFloat()
-                }
-                catch (e: Exception){
                     bot.sendMessage(
                         chatId = ChatId.fromId(message.chat.id),
-                        text = "Температура может быть указана только числом"
+                        text = "Раньше я отправлял примерно 160к токенов (максимум заявлен в 128к)"
                     )
-                    return@command
                 }
-
-                println("Новая температура ответов: $newTemperature")
-                bot.sendMessage(
-                    chatId = ChatId.fromId(message.chat.id),
-                    text = "Новая температура ответов: $newTemperature"
-                )
-            }
-            command("clearChat") {
-                val chatId = message.chat.id
-
-                // Удаляем историю из файла
-                val deleted = historyManager.clearHistory(chatId)
-
-                // Удаляем историю из памяти
-                chatHistories.remove(chatId)
-
-                val responseText = if (deleted) {
-                    "История чата успешно удалена. Начинаем с чистого листа!"
-                } else {
-                    "Произошла ошибка при удалении истории чата"
+                command("listTools"){
+                    val chatId = message.chat.id
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Инструменты: ${mcpTools.tools.map { it.name }}"
+                    )
                 }
+                command("changeRole") {
+                    val chatId = message.chat.id
+                    val joinedArgs = args.joinToString(separator = " ")
+                    val response = if (joinedArgs.isNotBlank()) joinedArgs else return@command
+                    println("Got response from changeSystemPromt $response")
+                    val newSystemPromt = response
 
-                bot.sendMessage(
-                    chatId = ChatId.fromId(chatId),
-                    text = responseText
-                )
-
-                println("Команда clearChat выполнена для чата $chatId: deleted=$deleted")
-            }
-            message(filter = Filter.Text) {
-                val chatId = message.chat.id
-
-                // Получаем или создаем историю для текущего чата
-                val history = chatHistories.getOrPut(chatId) {
-                    val loadedHistory = historyManager.loadHistory(chatId)
-                    if (loadedHistory.isNotEmpty()) {
-                        println("Загружена существующая история для чата $chatId")
-                        loadedHistory
-                    } else {
-                        println("Создана новая история для чата $chatId")
-                        mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
+                    // Получаем или создаем историю для текущего чата
+                    val history = chatHistories.getOrPut(chatId) {
+                        historyManager.loadHistory(chatId).takeIf { it.isNotEmpty() }
+                            ?: mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
                     }
-                }
 
-                handleTextUpdate(
-                    systemRole = SingleRole,
-                    gigaClient = gigaClient,
-                    ollamaClient = ollamaClient,
-                    gigaModel = gigaModel,
-                    update = update,
-                    gigaChatHistory = history,
-                    temperature = modelTemperature,
-                    historyManager = historyManager,
-                    reply = { chatId, text ->
-                        val result = bot.sendMessage(
-                            chatId = ChatId.fromId(chatId),
-                            text = text
+                    // Обновляем системный промпт
+                    history[0] = GigaChatMessage(role = "system", content = newSystemPromt)
+                    historyManager.saveHistory(chatId, history)
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Изменил системный промнт на $newSystemPromt"
+                    )
+                }
+                command("changeT") {
+                    val joinedArgs = args.joinToString(separator = " ")
+
+                    val newTemperature = try {
+                        joinedArgs.toFloat()
+                    }
+                    catch (e: Exception){
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(message.chat.id),
+                            text = "Температура может быть указана только числом"
                         )
-                        result.fold({}, { error ->
-                            println("Telegram sendMessage error: $error")
-                        })
+                        return@command
                     }
-                )
+
+                    println("Новая температура ответов: $newTemperature")
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(message.chat.id),
+                        text = "Новая температура ответов: $newTemperature"
+                    )
+                }
+                command("clearChat") {
+                    val chatId = message.chat.id
+
+                    // Удаляем историю из файла
+                    val deleted = historyManager.clearHistory(chatId)
+
+                    // Удаляем историю из памяти
+                    chatHistories.remove(chatId)
+
+                    val responseText = if (deleted) {
+                        "История чата успешно удалена. Начинаем с чистого листа!"
+                    } else {
+                        "Произошла ошибка при удалении истории чата"
+                    }
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = responseText
+                    )
+
+                    println("Команда clearChat выполнена для чата $chatId: deleted=$deleted")
+                }
+                message(filter = Filter.Text) {
+                    val chatId = message.chat.id
+
+                    // Получаем или создаем историю для текущего чата
+                    val history = chatHistories.getOrPut(chatId) {
+                        val loadedHistory = historyManager.loadHistory(chatId)
+                        if (loadedHistory.isNotEmpty()) {
+                            println("Загружена существующая история для чата $chatId")
+                            loadedHistory
+                        } else {
+                            println("Создана новая история для чата $chatId")
+                            mutableListOf(GigaChatMessage(role = "system", content = SingleRole))
+                        }
+                    }
+
+                    handleTextUpdate(
+                        systemRole = SingleRole,
+                        gigaClient = gigaClient,
+                        ollamaClient = ollamaClient,
+                        gigaModel = gigaModel,
+                        update = update,
+                        gigaChatHistory = history,
+                        temperature = modelTemperature,
+                        historyManager = historyManager,
+                        reply = { chatId, text ->
+                            val result = bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = text
+                            )
+                            result.fold({}, { error ->
+                                println("Telegram sendMessage error: $error")
+                            })
+                        }
+                    )
+                }
             }
         }
+
+        // Опциональный Ktor сервер (healthcheck)
+        embeddedServer(Netty, port = 12222) {
+            routing {
+                get("/") {
+                    call.respondText("Bot OK")
+                }
+            }
+
+        }.start(wait = false)
+
+        // Запуск polling
+        bot.startPolling()
+    }
+    catch (e: Exception){
+        println(e.stackTrace)
+        println("Process завершён")
+    }
+    finally {
+        process?.destroyForcibly()
     }
 
-    // Опциональный Ktor сервер (healthcheck)
-    embeddedServer(Netty, port = 12222) {
-        routing {
-            get("/") {
-                call.respondText("Bot OK")
-            }
-        }
-    }.start(wait = false)
-
-    // Запуск polling
-    bot.startPolling()
 }
 
 @Suppress("unused")
