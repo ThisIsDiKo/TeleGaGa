@@ -23,24 +23,22 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import io.modelcontextprotocol.kotlin.sdk.client.Client
-import io.modelcontextprotocol.kotlin.sdk.client.StdioClientTransport
-import io.modelcontextprotocol.kotlin.sdk.types.Implementation
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.io.Sink
-import kotlinx.io.Source
-import kotlinx.io.asSink
-import kotlinx.io.asSource
-import kotlinx.io.buffered
+import ru.dikoresearch.infrastructure.mcp.McpService
 import kotlinx.serialization.json.Json
 import java.lang.IllegalStateException
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
 
-suspend fun main() = run {
-    var process: Process? = null
+fun main() {
+    // Создаем ApplicationScope для управления корутинами всего приложения
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    var mcpService: McpService? = null
 
     try {
         val json = Json { ignoreUnknownKeys = true }
@@ -87,31 +85,13 @@ suspend fun main() = run {
         val chatHistories = mutableMapOf<Long, MutableList<GigaChatMessage>>()
 
         val modelTemperature = 0.87F
-        process = ProcessBuilder(
-            "npx", "-y", "@modelcontextprotocol/server-everything"
-        ).start()
-        val inputStream = process.inputStream.asSource().buffered()
-        val outputStream = process.outputStream.asSink().buffered()
 
-
-
-        val mcpClient = Client(
-            clientInfo = Implementation(
-                name = "my-kotlin-app",
-                version = "1.0.0"
-            )
-        )
-
-        val transport = StdioClientTransport(
-            input = inputStream,
-            output = outputStream
-        ) // URL вашего MCP-сервера
-
-        // Connect to server
-        mcpClient.connect(transport)
-        println("Сервер подключен")
-        val mcpTools = mcpClient.listTools()
-        println("Инструменты: ${mcpTools.tools.map { it.name }}")
+        // Инициализация MCP сервиса
+        mcpService = McpService()
+        runBlocking {
+            mcpService!!.initialize()
+        }
+        println("MCP сервис инициализирован и готов к работе")
 
         val bot = bot {
             token = telegramToken
@@ -130,10 +110,35 @@ suspend fun main() = run {
                 }
                 command("listTools"){
                     val chatId = message.chat.id
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = "Инструменты: ${mcpTools.tools.map { it.name }}"
-                    )
+
+                    // Используем applicationScope.launch для вызова suspend функции из синхронного контекста
+                    applicationScope.launch {
+                        try {
+                            val service = mcpService
+                            if (service == null) {
+                                bot.sendMessage(
+                                    chatId = ChatId.fromId(chatId),
+                                    text = "MCP сервис не инициализирован"
+                                )
+                                return@launch
+                            }
+
+                            val mcpTools = service.listTools()
+                            val toolNames = mcpTools.tools.map { it.name }
+                            val message = "Доступные MCP инструменты (${toolNames.size}):\n" +
+                                    toolNames.joinToString("\n") { "• $it" }
+
+                            bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = message
+                            )
+                        } catch (e: Exception) {
+                            bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = "Ошибка при получении списка инструментов: ${e.message}"
+                            )
+                        }
+                    }
                 }
                 command("changeRole") {
                     val chatId = message.chat.id
@@ -249,13 +254,32 @@ suspend fun main() = run {
 
         // Запуск polling
         bot.startPolling()
+
+        // Блокируем main поток, чтобы бот продолжал работать
+        println("Бот запущен. Нажмите Enter для остановки...")
+        readLine()
     }
     catch (e: Exception){
-        println(e.stackTrace)
-        println("Process завершён")
+        e.printStackTrace()
+        println("Ошибка в приложении: ${e.message}")
     }
     finally {
-        process?.destroyForcibly()
+        println("Начинается graceful shutdown...")
+
+        // Отменяем все корутины в applicationScope
+        applicationScope.cancel()
+        println("ApplicationScope отменен")
+
+        // Останавливаем MCP сервис
+        try {
+            runBlocking {
+                mcpService?.shutdown()
+            }
+        } catch (e: Exception) {
+            println("Ошибка при остановке MCP сервиса: ${e.message}")
+        }
+
+        println("Приложение завершено")
     }
 
 }
