@@ -1,0 +1,6 @@
+#TeleGaGa Configuration Template - заполните параметры и сохраните как config.properties
+#Mon Jan 27 09:52:00 MSK 2026
+telegram.token=
+gigachat.model=GigaChat
+gigachat.baseUrl=https://gigachat.devices.sberbank.ru
+gigachat.authKey=

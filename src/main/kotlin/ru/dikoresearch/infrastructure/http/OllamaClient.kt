@@ -1,3 +1,8 @@
+package ru.dikoresearch.infrastructure.http
+
+import GigaChatMessage
+import OllamaChatRequest
+import OllamaChatResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -43,6 +48,4 @@ class OllamaClient(
 
         return parsed
     }
-
-
 }

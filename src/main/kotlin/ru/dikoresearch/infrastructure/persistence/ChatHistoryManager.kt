@@ -1,7 +1,9 @@
+package ru.dikoresearch.infrastructure.persistence
+
+import GigaChatMessage
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
-
 
 /**
  * Менеджер для управления историей чатов с сохранением в JSON файлы.

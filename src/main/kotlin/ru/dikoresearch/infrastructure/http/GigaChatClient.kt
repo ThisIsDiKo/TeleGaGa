@@ -1,18 +1,19 @@
+package ru.dikoresearch.infrastructure.http
+
+import GigaChatChatRequest
+import GigaChatMessage
+import GigaChatResponse
 import io.ktor.client.*
-import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-
 import java.util.UUID
-import kotlin.text.get
 
 class GigaChatClient(
     private val httpClient: HttpClient,
@@ -24,6 +25,7 @@ class GigaChatClient(
     private val mutex = Mutex()
     @Volatile
     private var currentToken: String? = null
+
     suspend fun chatCompletion(
         model: String,
         messages: List<GigaChatMessage>,
@@ -69,14 +71,10 @@ class GigaChatClient(
             throw IllegalStateException("GigaChat error: ${response.status}: $bodyText")
         }
 
-        //val parsed: GigaChatChatResponse = json.decodeFromString(bodyText)
-
         val parsed: GigaChatResponse = json.decodeFromString(bodyText)
         println("Gigachat json parsed : $parsed")
 
-        //return parsed.choices.firstOrNull()?.message?.content ?: ""
         return parsed
-
     }
 
     private suspend fun getOrRequestToken(): String {
