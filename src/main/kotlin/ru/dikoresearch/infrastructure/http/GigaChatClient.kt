@@ -1,6 +1,7 @@
 package ru.dikoresearch.infrastructure.http
 
 import GigaChatChatRequest
+import GigaChatFunction
 import GigaChatMessage
 import GigaChatResponse
 import io.ktor.client.*
@@ -29,7 +30,9 @@ class GigaChatClient(
     suspend fun chatCompletion(
         model: String,
         messages: List<GigaChatMessage>,
-        temperature: Float
+        temperature: Float,
+        functions: List<GigaChatFunction>? = null,
+        functionCall: String? = null
     ): GigaChatResponse {
         return callWithTokenRetry { token ->
             val rqUID = UUID.randomUUID().toString()
@@ -37,10 +40,15 @@ class GigaChatClient(
             val requestBody = GigaChatChatRequest(
                 model = model,
                 messages = messages,
-                temperature = temperature
+                temperature = temperature,
+                functions = functions,
+                functionCall = functionCall
             )
 
-            println(requestBody)
+            println("GigaChat Request: $requestBody")
+            if (functions != null) {
+                println("Functions передано: ${functions.size} шт.")
+            }
 
             httpClient.post("$baseUrl/api/v1/chat/completions") {
                 contentType(ContentType.Application.Json)

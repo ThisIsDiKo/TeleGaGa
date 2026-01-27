@@ -1,5 +1,6 @@
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 // Моделька для второго урока
 @Serializable
@@ -13,14 +14,19 @@ data class AIChallengeResponse(
 @Serializable
 data class GigaChatMessage(
     val role: String,
-    val content: String
+    val content: String,
+    @SerialName("function_call")
+    val functionCall: GigaChatFunctionCall? = null
 )
 
 @Serializable
 data class GigaChatChatRequest(
     val model: String,
     val messages: List<GigaChatMessage>,
-    val temperature: Float
+    val temperature: Float,
+    val functions: List<GigaChatFunction>? = null,
+    @SerialName("function_call")
+    val functionCall: String? = null // "auto" | "none" или {"name": "function_name"}
 )
 
 @Serializable
@@ -65,7 +71,9 @@ data class Choice(
 @Serializable
 data class Message(
     val content: String,
-    val role: String
+    val role: String,
+    @SerialName("function_call")
+    val functionCall: GigaChatFunctionCall? = null
 )
 
 @Serializable
@@ -78,4 +86,46 @@ data class Usage(
     val totalTokens: Int,
     @SerialName("precached_prompt_tokens")
     val precachedPromptTokens: Int
+)
+
+// === Models for Function Calling Support ===
+
+/**
+ * Определение функции для GigaChat API
+ */
+@Serializable
+data class GigaChatFunction(
+    val name: String,
+    val description: String,
+    val parameters: GigaChatFunctionParameters
+)
+
+/**
+ * Параметры функции в формате JSON Schema
+ */
+@Serializable
+data class GigaChatFunctionParameters(
+    val type: String, // "object"
+    val properties: Map<String, GigaChatPropertySchema>,
+    val required: List<String>? = null
+)
+
+/**
+ * Схема свойства параметра функции
+ */
+@Serializable
+data class GigaChatPropertySchema(
+    val type: String, // "string", "number", "boolean", "array", "object"
+    val description: String? = null,
+    val enum: List<String>? = null,
+    val items: GigaChatPropertySchema? = null // для массивов
+)
+
+/**
+ * Вызов функции от модели
+ */
+@Serializable
+data class GigaChatFunctionCall(
+    val name: String,
+    val arguments: JsonElement // JSON объект или строка с аргументами
 )

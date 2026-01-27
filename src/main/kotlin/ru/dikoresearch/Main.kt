@@ -54,6 +54,14 @@ val AssistantRole = "Ты — эксперт \n" +
 
 val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
 
+val McpEnabledRole = """
+Ты - умный AI ассистент с доступом к набору полезных инструментов через Model Context Protocol (MCP).
+Когда пользователь задает вопрос, который требует:
+1. Получения актуальной информации из интернета - используй инструмент get_chuck_norris_joke от mcp chuck server
+
+Будь проактивным, но разумным в использовании инструментов.
+""".trimIndent()
+
 fun main() {
     // ApplicationScope для управления корутинами всего приложения
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -91,18 +99,27 @@ fun main() {
         println("   ChatHistoryManager инициализирован\n")
 
         // 5. Инициализация MCP сервиса
-        println("5. Инициализация MCP сервиса...")
+        println("5. Инициализация Chuck Norris MCP сервиса...")
         mcpService = McpService()
-        runBlocking {
-            mcpService!!.initialize()
+        try {
+            runBlocking {
+                mcpService!!.initialize()
+            }
+            println("   MCP сервис инициализирован и готов к работе\n")
+        } catch (e: Exception) {
+            println("   ⚠️ Не удалось запустить Chuck Norris MCP сервер: ${e.message}")
+            println("   💡 Для работы с MCP установите зависимости:")
+            println("      cd mcp-chuck-server && npm install")
+            println("   Бот продолжит работу без MCP функций\n")
+            mcpService = null
         }
-        println("   MCP сервис инициализирован и готов к работе\n")
 
         // 6. Создание Domain Layer
         println("6. Создание ChatOrchestrator...")
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
-            historyManager = historyManager
+            historyManager = historyManager,
+            mcpService = mcpService
         )
         println("   ChatOrchestrator создан\n")
 
@@ -111,7 +128,7 @@ fun main() {
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
-            mcpService = mcpService!!,
+            mcpService = mcpService,
             applicationScope = applicationScope,
             defaultSystemRole = SingleRole,
             defaultTemperature = 0.87F,

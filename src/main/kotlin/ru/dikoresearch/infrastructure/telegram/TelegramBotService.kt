@@ -21,7 +21,7 @@ import ru.dikoresearch.infrastructure.mcp.McpService
 class TelegramBotService(
     private val telegramToken: String,
     private val chatOrchestrator: ChatOrchestrator,
-    private val mcpService: McpService,
+    private val mcpService: McpService?,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
@@ -68,9 +68,10 @@ class TelegramBotService(
             val chatId = message.chat.id
             bot.sendMessage(
                 chatId = ChatId.fromId(chatId),
-                text = "Привет! Я TeleGaGa бот на основе GigaChat.\n\n" +
+                text = "Привет! Я TeleGaGa бот на основе GigaChat с поддержкой MCP инструментов.\n\n" +
                         "Доступные команды:\n" +
                         "/listTools - список доступных MCP инструментов\n" +
+                        "/enableMcp - включить MCP режим с доступом к инструментам\n" +
                         "/changeRole <текст> - изменить системный промпт\n" +
                         "/changeT <число> - изменить температуру модели (0.0 - 1.0)\n" +
                         "/clearChat - очистить историю чата\n" +
@@ -92,6 +93,14 @@ class TelegramBotService(
             // Используем applicationScope.launch для вызова suspend функции
             applicationScope.launch {
                 try {
+                    if (mcpService == null) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "MCP сервис недоступен. Запустите сервер: ./gradlew :mcp-chuck-server:run"
+                        )
+                        return@launch
+                    }
+
                     val mcpTools = mcpService.listTools()
                     val toolNames = mcpTools.tools.map { it.name }
                     val message = "Доступные MCP инструменты (${toolNames.size}):\n" +
@@ -193,6 +202,33 @@ class TelegramBotService(
                 )
             }
         }
+
+        command("enableMcp") {
+            val chatId = message.chat.id
+
+            try {
+                // Используем McpEnabledRole из Main.kt
+                val mcpRole = ru.dikoresearch.McpEnabledRole
+                chatOrchestrator.updateSystemRole(chatId, mcpRole)
+
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = "⚡ MCP режим активирован!\n\n" +
+                            "Теперь у меня есть доступ к инструментам:\n" +
+                            "• fetch - получение данных из интернета\n" +
+                            "• search - поиск информации\n" +
+                            "• file operations - работа с файлами\n" +
+                            "• memory - сохранение информации\n\n" +
+                            "Попробуй задать вопрос, требующий актуальных данных!"
+                )
+                println("MCP режим включен для чата $chatId")
+            } catch (e: Exception) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = "Ошибка при включении MCP режима: ${e.message}"
+                )
+            }
+        }
     }
 
     /**
@@ -220,9 +256,16 @@ class TelegramBotService(
 
                     // Формируем ответ с информацией о токенах
                     val fullResponse = buildString {
+                        if (response.toolsUsed) {
+                            appendLine("⚡ MCP TOOLS АКТИВНЫ ⚡")
+                            appendLine()
+                        }
                         appendLine("*** GigaChat T = $temperature ***")
                         appendLine(response.text)
                         appendLine()
+                        if (response.toolsUsed) {
+                            appendLine("▶ MCP инструменты использованы")
+                        }
                         appendLine("Отправлены токены: ${response.tokenUsage.promptTokens}")
                         appendLine("Получены токены: ${response.tokenUsage.completionTokens}")
                         appendLine("Оплачены токены: ${response.tokenUsage.totalTokens}")

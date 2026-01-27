@@ -10,13 +10,16 @@ import kotlinx.io.asSource
 import kotlinx.io.buffered
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
  * Сервис для управления MCP (Model Context Protocol) клиентом и процессом.
- * Инкапсулирует логику запуска npx процесса, подключения клиента и управления lifecycle.
+ * Запускает Chuck Norris MCP сервер через Node.js и подключается к нему.
  */
-class McpService {
+class McpService(
+    private val mcpServerPath: String = "mcp-chuck-server/index.js"
+) {
     private var process: Process? = null
     private var client: Client? = null
     private val mutex = Mutex()
@@ -26,7 +29,7 @@ class McpService {
 
     /**
      * Инициализация MCP сервера и клиента.
-     * Запускает npx процесс и подключает клиента через StdioClientTransport.
+     * Запускает node процесс и подключает клиента через StdioClientTransport.
      */
     suspend fun initialize() = mutex.withLock {
         if (isInitialized) {
@@ -35,12 +38,23 @@ class McpService {
         }
 
         try {
-            println("Запуск MCP сервера...")
+            println("Запуск Chuck Norris MCP сервера...")
 
-            // Запускаем npx процесс
-            process = ProcessBuilder(
-                "npx", "-y", "@modelcontextprotocol/server-everything"
-            ).start()
+            // Проверяем наличие файла сервера
+            val serverFile = File(mcpServerPath)
+            if (!serverFile.exists()) {
+                throw IllegalStateException("MCP сервер не найден: ${serverFile.absolutePath}")
+            }
+
+            // Проверяем наличие node_modules
+            val nodeModulesDir = File("mcp-chuck-server/node_modules")
+            if (!nodeModulesDir.exists()) {
+                println("⚠️ node_modules не найдены. Запустите: cd mcp-chuck-server && npm install")
+                throw IllegalStateException("Зависимости MCP сервера не установлены")
+            }
+
+            // Запускаем node процесс
+            process = ProcessBuilder("node", serverFile.absolutePath).start()
 
             val inputStream = process!!.inputStream.asSource().buffered()
             val outputStream = process!!.outputStream.asSink().buffered()
@@ -62,9 +76,9 @@ class McpService {
             client!!.connect(transport)
             isInitialized = true
 
-            println("MCP сервер успешно подключен")
+            println("✅ Chuck Norris MCP сервер успешно подключен")
         } catch (e: Exception) {
-            println("Ошибка при инициализации MCP сервера: ${e.message}")
+            println("Ошибка при инициализации Chuck Norris MCP сервера: ${e.message}")
             e.printStackTrace()
 
             // Очистка ресурсов при ошибке
@@ -133,7 +147,7 @@ class McpService {
             return
         }
 
-        println("Остановка MCP сервиса...")
+        println("Остановка Chuck Norris MCP сервиса...")
 
         try {
             // Закрываем клиента
@@ -155,7 +169,7 @@ class McpService {
                     proc.waitFor(2, TimeUnit.SECONDS)
                 }
 
-                println("MCP процесс завершен")
+                println("Chuck Norris MCP процесс завершен")
             }
         } catch (e: Exception) {
             println("Ошибка при завершении MCP процесса: ${e.message}")
@@ -166,7 +180,7 @@ class McpService {
             isInitialized = false
         }
 
-        println("McpService успешно остановлен")
+        println("Chuck Norris McpService успешно остановлен")
     }
 
     /**
@@ -179,7 +193,7 @@ class McpService {
         }
 
         if (process?.isAlive != true) {
-            throw IllegalStateException("MCP процесс не запущен или был завершен.")
+            throw IllegalStateException("Chuck Norris MCP процесс не запущен или был завершен.")
         }
     }
 }

@@ -1,0 +1,17 @@
+{
+  "name": "mcp-chuck-server",
+  "version": "1.0.0",
+  "description": "MCP Server providing Chuck Norris jokes",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
