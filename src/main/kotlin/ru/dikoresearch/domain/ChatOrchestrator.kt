@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.mcp.McpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
+import java.time.LocalDate
 
 /**
  * Оркестратор чат-логики - чистая бизнес-логика без зависимости от Telegram
@@ -40,6 +41,9 @@ class ChatOrchestrator(
         // Получаем или создаем историю для текущего чата
         val history = loadOrCreateHistory(chatId, systemRole)
 
+        // Сохраняем оригинальное системное сообщение для восстановления после обработки
+        val originalSystemMessage = if (history.isNotEmpty()) history[0] else null
+
         // Добавляем сообщение пользователя в историю
         history.add(GigaChatMessage(role = "user", content = userMessage))
 
@@ -48,6 +52,44 @@ class ChatOrchestrator(
             toolCallHandler.getAvailableFunctions()
         } else {
             null
+        }
+
+        // Добавляем chatId и текущую дату в контекст основного системного сообщения для MCP
+        if (availableFunctions != null && history.isNotEmpty()) {
+            val originalSystemMessage = history[0]
+
+            // Получаем текущую дату
+            val currentDate = LocalDate.now()
+            val tomorrow = currentDate.plusDays(1)
+            val dayAfterTomorrow = currentDate.plusDays(2)
+
+            val enhancedSystemMessage = GigaChatMessage(
+                role = "system",
+                content = buildString {
+                    append(originalSystemMessage.content)
+                    appendLine()
+                    appendLine()
+                    appendLine("ВАЖНО: Твой chatId = $chatId. ВСЕГДА используй этот chatId при вызове всех инструментов (create_reminder, get_reminders, delete_reminder).")
+                    appendLine()
+                    appendLine("ТЕКУЩАЯ ДАТА:")
+                    appendLine("Сегодня: $currentDate")
+                    appendLine("Завтра: $tomorrow")
+                    appendLine("Послезавтра: $dayAfterTomorrow")
+                    appendLine()
+                    appendLine("КРИТИЧЕСКИ ВАЖНО для create_reminder:")
+                    appendLine("Параметр dueDate должен содержать ТОЛЬКО дату в формате YYYY-MM-DD, БЕЗ времени!")
+                    appendLine("Время НЕ включать в dueDate! Время добавляй в параметр text.")
+                    appendLine()
+                    appendLine("Правильные примеры:")
+                    appendLine("✓ dueDate='$currentDate', text='В 23:00 позвонить на почту'")
+                    appendLine("✓ dueDate='$tomorrow', text='Купить молоко'")
+                    appendLine()
+                    appendLine("НЕПРАВИЛЬНЫЕ примеры (НЕ делай так!):")
+                    appendLine("✗ dueDate='$currentDate 23:00' - НЕТ! Время в dueDate запрещено!")
+                    appendLine("✗ dueDate='23:00' - НЕТ! dueDate это дата, а не время!")
+                }
+            )
+            history[0] = enhancedSystemMessage
         }
 
         // Основной цикл обработки с поддержкой tool calling
@@ -106,14 +148,22 @@ class ChatOrchestrator(
                     )
                 )
 
-                // Добавляем в историю результат функции
+                // Добавляем в историю результат функции (всегда в формате JSON)
                 history.add(
                     GigaChatMessage(
                         role = "function",
                         content = if (executionResult.success) {
                             executionResult.result
                         } else {
-                            "Ошибка при выполнении функции: ${executionResult.error}"
+                            // Ошибка тоже должна быть в JSON формате
+                            val errorMsg = executionResult.error ?: "Unknown error"
+                            val escapedError = errorMsg
+                                .replace("\\", "\\\\")
+                                .replace("\"", "\\\"")
+                                .replace("\n", "\\n")
+                                .replace("\r", "\\r")
+                                .replace("\t", "\\t")
+                            """{"error": "$escapedError"}"""
                         }
                     )
                 )
@@ -133,6 +183,11 @@ class ChatOrchestrator(
 
         if (iterationCount >= maxIterations) {
             println("Достигнут лимит итераций tool calling: $maxIterations")
+        }
+
+        // Восстанавливаем оригинальное системное сообщение перед сохранением
+        if (availableFunctions != null && originalSystemMessage != null && history.isNotEmpty()) {
+            history[0] = originalSystemMessage
         }
 
         // Сохраняем историю

@@ -31,7 +31,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("MainKt")
+    mainClass.set("ru.dikoresearch.MainKt")
 }
 
 kotlin {

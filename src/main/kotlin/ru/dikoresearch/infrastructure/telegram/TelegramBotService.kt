@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
 import ru.dikoresearch.infrastructure.mcp.McpService
+import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 
 /**
  * Сервис для управления Telegram ботом
@@ -22,15 +23,14 @@ class TelegramBotService(
     private val telegramToken: String,
     private val chatOrchestrator: ChatOrchestrator,
     private val mcpService: McpService?,
+    private val settingsManager: ChatSettingsManager,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
     private val gigaChatModel: String
 ) {
-    private lateinit var bot: Bot
-
-    // Храним температуру для каждого чата (chatId -> temperature)
-    private val chatTemperatures = mutableMapOf<Long, Float>()
+    lateinit var bot: Bot
+        private set
 
     /**
      * Запускает бота с настроенными обработчиками команд
@@ -68,14 +68,22 @@ class TelegramBotService(
             val chatId = message.chat.id
             bot.sendMessage(
                 chatId = ChatId.fromId(chatId),
-                text = "Привет! Я TeleGaGa бот на основе GigaChat с поддержкой MCP инструментов.\n\n" +
-                        "Доступные команды:\n" +
-                        "/listTools - список доступных MCP инструментов\n" +
-                        "/enableMcp - включить MCP режим с доступом к инструментам\n" +
-                        "/changeRole <текст> - изменить системный промпт\n" +
-                        "/changeT <число> - изменить температуру модели (0.0 - 1.0)\n" +
-                        "/clearChat - очистить историю чата\n" +
-                        "/destroyContext - информация о старом методе разрушения контекста"
+                text = buildString {
+                    appendLine("Привет! Я TeleGaGa бот на основе GigaChat с поддержкой MCP инструментов.")
+                    appendLine()
+                    appendLine("Доступные команды:")
+                    appendLine("/changeRole <текст> - изменить системный промпт")
+                    appendLine("/changeT <число> - изменить температуру модели (0.0-1.0)")
+                    appendLine("/clearChat - очистить историю чата")
+                    appendLine()
+                    appendLine("MCP инструменты:")
+                    appendLine("/enableMcp - включить MCP режим с доступом к инструментам")
+                    appendLine("/listTools - показать доступные MCP инструменты")
+                    appendLine()
+                    appendLine("📅 Управление напоминаниями:")
+                    appendLine("/setReminderTime HH:mm - настроить время ежедневных напоминаний")
+                    appendLine("/disableReminders - отключить автоматические напоминания")
+                }
             )
         }
 
@@ -168,13 +176,16 @@ class TelegramBotService(
                 return@command
             }
 
-            chatTemperatures[chatId] = newTemperature
+            applicationScope.launch {
+                val settings = settingsManager.loadSettings(chatId)
+                settingsManager.saveSettings(chatId, settings.copy(temperature = newTemperature))
 
-            bot.sendMessage(
-                chatId = ChatId.fromId(chatId),
-                text = "Новая температура ответов: $newTemperature"
-            )
-            println("Температура изменена для чата $chatId: $newTemperature")
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = "Новая температура ответов: $newTemperature"
+                )
+                println("Температура изменена для чата $chatId: $newTemperature")
+            }
         }
 
         command("clearChat") {
@@ -182,7 +193,6 @@ class TelegramBotService(
 
             try {
                 val deleted = chatOrchestrator.clearHistory(chatId)
-                chatTemperatures.remove(chatId)
 
                 val responseText = if (deleted) {
                     "История чата успешно удалена. Начинаем с чистого листа!"
@@ -203,6 +213,73 @@ class TelegramBotService(
             }
         }
 
+        command("setReminderTime") {
+            val chatId = message.chat.id
+            val timeStr = args.joinToString(" ")
+
+            // Валидация формата HH:mm
+            val timePattern = Regex("^([01]\\d|2[0-3]):([0-5]\\d)$")
+            if (!timePattern.matches(timeStr)) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = "❌ Неверный формат времени. Используйте HH:mm (например, 09:00)"
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                try {
+                    val settings = settingsManager.loadSettings(chatId)
+                    val updatedSettings = settings.copy(
+                        reminderTime = timeStr,
+                        reminderEnabled = true
+                    )
+                    settingsManager.saveSettings(chatId, updatedSettings)
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = buildString {
+                            appendLine("⏰ Напоминания будут приходить ежедневно в $timeStr")
+                            appendLine()
+                            appendLine("Теперь вы можете добавлять напоминания через диалог:")
+                            appendLine("\"Напомни мне завтра купить молоко\"")
+                            appendLine()
+                            appendLine("💡 Для работы с напоминаниями включите MCP режим командой /enableMcp")
+                        }
+                    )
+                    println("✅ Время напоминаний установлено для чата $chatId: $timeStr")
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "❌ Ошибка при настройке напоминаний: ${e.message}"
+                    )
+                }
+            }
+        }
+
+        command("disableReminders") {
+            val chatId = message.chat.id
+
+            applicationScope.launch {
+                try {
+                    val settings = settingsManager.loadSettings(chatId)
+                    val updatedSettings = settings.copy(reminderEnabled = false)
+                    settingsManager.saveSettings(chatId, updatedSettings)
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "🔕 Автоматические напоминания отключены"
+                    )
+                    println("✅ Напоминания отключены для чата $chatId")
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "❌ Ошибка: ${e.message}"
+                    )
+                }
+            }
+        }
+
         command("enableMcp") {
             val chatId = message.chat.id
 
@@ -213,13 +290,18 @@ class TelegramBotService(
 
                 bot.sendMessage(
                     chatId = ChatId.fromId(chatId),
-                    text = "⚡ MCP режим активирован!\n\n" +
-                            "Теперь у меня есть доступ к инструментам:\n" +
-                            "• fetch - получение данных из интернета\n" +
-                            "• search - поиск информации\n" +
-                            "• file operations - работа с файлами\n" +
-                            "• memory - сохранение информации\n\n" +
-                            "Попробуй задать вопрос, требующий актуальных данных!"
+                    text = buildString {
+                        appendLine("⚡ MCP режим активирован!")
+                        appendLine()
+                        appendLine("Теперь у меня есть доступ к инструментам:")
+                        appendLine("• create_reminder - создание напоминаний")
+                        appendLine("• get_reminders - получение списка дел")
+                        appendLine("• delete_reminder - удаление напоминаний")
+                        appendLine()
+                        appendLine("Попробуй:")
+                        appendLine("\"Напомни мне завтра купить молоко\"")
+                        appendLine("\"Что у меня на сегодня?\"")
+                    }
                 )
                 println("MCP режим включен для чата $chatId")
             } catch (e: Exception) {
@@ -239,12 +321,13 @@ class TelegramBotService(
             val chatId = message.chat.id
             val userMessage = message.text ?: return@message
 
-            // Получаем температуру для чата или используем дефолтную
-            val temperature = chatTemperatures.getOrDefault(chatId, defaultTemperature)
-
             // Используем applicationScope для обработки сообщения
             applicationScope.launch {
                 try {
+                    // Получаем температуру для чата из настроек
+                    val settings = settingsManager.loadSettings(chatId)
+                    val temperature = settings.temperature
+
                     // Обрабатываем сообщение через ChatOrchestrator
                     val response = chatOrchestrator.processMessage(
                         chatId = chatId,

@@ -1,0 +1,40 @@
+{
+  "chatId": "702588940",
+  "reminders": [
+    {
+      "id": "2539d056-adfa-469e-870d-57d713e9b613",
+      "text": "В 23 позвонить на почту",
+      "dueDate": "2026-01-28",
+      "createdAt": "2026-01-28T19:30:06.463Z",
+      "completed": false
+    },
+    {
+      "id": "a3e3e855-bbb6-4b6a-afa5-ee114afde11d",
+      "text": "23:15 написать в телеграмм",
+      "dueDate": "2026-01-28",
+      "createdAt": "2026-01-28T19:30:42.164Z",
+      "completed": false
+    },
+    {
+      "id": "3b99a06a-31b0-4a99-b2e4-4425da04109c",
+      "text": "23:35 попить воды",
+      "dueDate": "2026-01-28",
+      "createdAt": "2026-01-28T19:43:21.458Z",
+      "completed": false
+    },
+    {
+      "id": "b8a7bf4b-63e2-4fb1-a543-9d77b8f4dfab",
+      "text": "23:26 убрать кровать",
+      "dueDate": "2026-01-28",
+      "createdAt": "2026-01-28T19:44:07.526Z",
+      "completed": false
+    },
+    {
+      "id": "ca577be0-87dc-40fd-9fc8-8496ebfda3fe",
+      "text": "23:55 сходил поорал на балконе",
+      "dueDate": "2026-01-28",
+      "createdAt": "2026-01-28T19:51:01.593Z",
+      "completed": false
+    }
+  ]
+}

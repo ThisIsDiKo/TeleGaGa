@@ -15,10 +15,10 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Сервис для управления MCP (Model Context Protocol) клиентом и процессом.
- * Запускает Chuck Norris MCP сервер через Node.js и подключается к нему.
+ * Запускает MCP сервер через Node.js и подключается к нему.
  */
 class McpService(
-    private val mcpServerPath: String = "mcp-chuck-server/index.js"
+    private val mcpServerPath: String = "mcp-reminders-server/index.js"
 ) {
     private var process: Process? = null
     private var client: Client? = null
@@ -38,7 +38,7 @@ class McpService(
         }
 
         try {
-            println("Запуск Chuck Norris MCP сервера...")
+            println("Запуск MCP сервера: $mcpServerPath")
 
             // Проверяем наличие файла сервера
             val serverFile = File(mcpServerPath)
@@ -47,9 +47,10 @@ class McpService(
             }
 
             // Проверяем наличие node_modules
-            val nodeModulesDir = File("mcp-chuck-server/node_modules")
+            val serverDir = serverFile.parentFile
+            val nodeModulesDir = File(serverDir, "node_modules")
             if (!nodeModulesDir.exists()) {
-                println("⚠️ node_modules не найдены. Запустите: cd mcp-chuck-server && npm install")
+                println("⚠️ node_modules не найдены. Запустите: cd ${serverDir.name} && npm install")
                 throw IllegalStateException("Зависимости MCP сервера не установлены")
             }
 
@@ -76,9 +77,9 @@ class McpService(
             client!!.connect(transport)
             isInitialized = true
 
-            println("✅ Chuck Norris MCP сервер успешно подключен")
+            println("✅ MCP сервер успешно подключен")
         } catch (e: Exception) {
-            println("Ошибка при инициализации Chuck Norris MCP сервера: ${e.message}")
+            println("Ошибка при инициализации MCP сервера: ${e.message}")
             e.printStackTrace()
 
             // Очистка ресурсов при ошибке
@@ -147,7 +148,7 @@ class McpService(
             return
         }
 
-        println("Остановка Chuck Norris MCP сервиса...")
+        println("Остановка MCP сервиса...")
 
         try {
             // Закрываем клиента
@@ -169,7 +170,7 @@ class McpService(
                     proc.waitFor(2, TimeUnit.SECONDS)
                 }
 
-                println("Chuck Norris MCP процесс завершен")
+                println("MCP процесс завершен")
             }
         } catch (e: Exception) {
             println("Ошибка при завершении MCP процесса: ${e.message}")
@@ -180,7 +181,7 @@ class McpService(
             isInitialized = false
         }
 
-        println("Chuck Norris McpService успешно остановлен")
+        println("McpService успешно остановлен")
     }
 
     /**
@@ -193,7 +194,7 @@ class McpService(
         }
 
         if (process?.isAlive != true) {
-            throw IllegalStateException("Chuck Norris MCP процесс не запущен или был завершен.")
+            throw IllegalStateException("MCP процесс не запущен или был завершен.")
         }
     }
 }

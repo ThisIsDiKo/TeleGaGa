@@ -1,0 +1,14 @@
+{
+  "name": "mcp-reminders-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "MCP server for managing reminders in TeleGaGa bot",
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "uuid": "^9.0.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}

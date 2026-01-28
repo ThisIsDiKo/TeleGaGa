@@ -17,11 +17,13 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import ru.dikoresearch.domain.ChatOrchestrator
+import ru.dikoresearch.domain.ReminderScheduler
 import ru.dikoresearch.infrastructure.config.ConfigService
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
 import ru.dikoresearch.infrastructure.mcp.McpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
+import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
@@ -55,11 +57,24 @@ val AssistantRole = "Ты — эксперт \n" +
 val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
 
 val McpEnabledRole = """
-Ты - умный AI ассистент с доступом к набору полезных инструментов через Model Context Protocol (MCP).
-Когда пользователь задает вопрос, который требует:
-1. Получения актуальной информации из интернета - используй инструмент get_chuck_norris_joke от mcp chuck server
+Ты - умный AI ассистент с доступом к инструментам для управления напоминаниями через Model Context Protocol (MCP).
 
-Будь проактивным, но разумным в использовании инструментов.
+Доступные инструменты:
+1. create_reminder - создать новое напоминание
+2. get_reminders - получить напоминания за период
+3. delete_reminder - удалить/завершить напоминание
+
+ВАЖНЫЕ ПРАВИЛА для create_reminder:
+- Параметр dueDate ДОЛЖЕН быть в формате YYYY-MM-DD (только дата, без времени!)
+- Используй даты из контекста "ТЕКУЩАЯ ДАТА И ВРЕМЯ" который будет предоставлен
+- Время (например "в 23:00") включай в параметр text, а не в dueDate
+- Примеры правильных вызовов:
+  * "Напомни сегодня в 23:00 позвонить" -> dueDate="<сегодняшняя_дата>", text="В 23:00 позвонить"
+  * "Напомни завтра купить молоко" -> dueDate="<завтрашняя_дата>", text="Купить молоко"
+
+Когда пользователь просит напомнить о чем-то, автоматически используй create_reminder.
+Когда спрашивает "что у меня на сегодня?" - используй get_reminders.
+Будь проактивным и полезным.
 """.trimIndent()
 
 fun main() {
@@ -67,6 +82,7 @@ fun main() {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var mcpService: McpService? = null
     var botService: TelegramBotService? = null
+    var reminderScheduler: ReminderScheduler? = null
 
     try {
         println("=== Запуск TeleGaGa бота ===\n")
@@ -98,24 +114,29 @@ fun main() {
         val historyManager = ChatHistoryManager()
         println("   ChatHistoryManager инициализирован\n")
 
-        // 5. Инициализация MCP сервиса
-        println("5. Инициализация Chuck Norris MCP сервиса...")
-        mcpService = McpService()
+        // 5. Инициализация ChatSettingsManager
+        println("5. Инициализация ChatSettingsManager...")
+        val settingsManager = ChatSettingsManager()
+        println("   ChatSettingsManager инициализирован\n")
+
+        // 6. Инициализация MCP сервиса (Reminders)
+        println("6. Инициализация Reminders MCP сервиса...")
+        mcpService = McpService("mcp-reminders-server/index.js")
         try {
             runBlocking {
                 mcpService!!.initialize()
             }
-            println("   MCP сервис инициализирован и готов к работе\n")
+            println("   ✅ MCP сервис инициализирован и готов к работе\n")
         } catch (e: Exception) {
-            println("   ⚠️ Не удалось запустить Chuck Norris MCP сервер: ${e.message}")
+            println("   ⚠️ Не удалось запустить Reminders MCP сервер: ${e.message}")
             println("   💡 Для работы с MCP установите зависимости:")
-            println("      cd mcp-chuck-server && npm install")
+            println("      cd mcp-reminders-server && npm install")
             println("   Бот продолжит работу без MCP функций\n")
             mcpService = null
         }
 
-        // 6. Создание Domain Layer
-        println("6. Создание ChatOrchestrator...")
+        // 7. Создание Domain Layer
+        println("7. Создание ChatOrchestrator...")
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
             historyManager = historyManager,
@@ -123,12 +144,13 @@ fun main() {
         )
         println("   ChatOrchestrator создан\n")
 
-        // 7. Создание Telegram Bot Service
-        println("7. Инициализация Telegram Bot Service...")
+        // 8. Создание Telegram Bot Service
+        println("8. Инициализация Telegram Bot Service...")
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
             mcpService = mcpService,
+            settingsManager = settingsManager,
             applicationScope = applicationScope,
             defaultSystemRole = SingleRole,
             defaultTemperature = 0.87F,
@@ -136,15 +158,28 @@ fun main() {
         )
         println("   TelegramBotService создан\n")
 
-        // 8. Запуск Health Check сервера
-        println("8. Запуск Health Check сервера...")
+        // 9. Запуск Health Check сервера
+        println("9. Запуск Health Check сервера...")
         startHealthCheckServer()
         println("   Health Check сервер запущен на http://localhost:12222\n")
 
-        // 9. Запуск бота
-        println("9. Запуск Telegram бота...")
+        // 10. Запуск Telegram бота
+        println("10. Запуск Telegram бота...")
         botService.start()
-        println("\n=== TeleGaGa бот успешно запущен ===")
+        println("   TelegramBot запущен\n")
+
+        // 11. Создание и запуск ReminderScheduler
+        println("11. Создание ReminderScheduler...")
+        reminderScheduler = ReminderScheduler(
+            settingsManager = settingsManager,
+            chatOrchestrator = chatOrchestrator,
+            telegramBot = botService.bot,
+            applicationScope = applicationScope
+        )
+        reminderScheduler.start()
+        println("   ReminderScheduler запущен\n")
+
+        println("=== TeleGaGa бот успешно запущен ===")
         println("Для остановки нажмите Enter\n")
 
         // Блокируем main поток до получения Enter
@@ -155,6 +190,9 @@ fun main() {
         println("\nОшибка в приложении: ${e.message}")
     } finally {
         println("\n=== Начинается graceful shutdown ===")
+
+        // Останавливаем ReminderScheduler
+        reminderScheduler?.stop()
 
         // Отменяем все корутины в applicationScope
         applicationScope.cancel()
