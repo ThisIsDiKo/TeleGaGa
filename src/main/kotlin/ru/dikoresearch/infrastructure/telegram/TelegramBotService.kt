@@ -12,7 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
-import ru.dikoresearch.infrastructure.mcp.McpService
+import ru.dikoresearch.infrastructure.mcp.HttpMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 
 /**
@@ -22,7 +22,7 @@ import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 class TelegramBotService(
     private val telegramToken: String,
     private val chatOrchestrator: ChatOrchestrator,
-    private val mcpService: McpService?,
+    private val mcpService: HttpMcpService?,
     private val settingsManager: ChatSettingsManager,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
@@ -110,7 +110,7 @@ class TelegramBotService(
                     }
 
                     val mcpTools = mcpService.listTools()
-                    val toolNames = mcpTools.tools.map { it.name }
+                    val toolNames = mcpTools.map { it.name }
                     val message = "Доступные MCP инструменты (${toolNames.size}):\n" +
                             toolNames.joinToString("\n") { "• $it" }
 
@@ -294,11 +294,14 @@ class TelegramBotService(
                         appendLine("⚡ MCP режим активирован!")
                         appendLine()
                         appendLine("Теперь у меня есть доступ к инструментам:")
+                        appendLine("• get_weather - погода в любом городе")
                         appendLine("• create_reminder - создание напоминаний")
                         appendLine("• get_reminders - получение списка дел")
                         appendLine("• delete_reminder - удаление напоминаний")
+                        appendLine("• get_chuck_norris_joke - шутки про Чака (перевожу на русский)")
                         appendLine()
                         appendLine("Попробуй:")
+                        appendLine("\"Какая погода в Санкт-Петербурге?\"")
                         appendLine("\"Напомни мне завтра купить молоко\"")
                         appendLine("\"Что у меня на сегодня?\"")
                     }
@@ -334,21 +337,14 @@ class TelegramBotService(
                         userMessage = userMessage,
                         systemRole = defaultSystemRole,
                         temperature = temperature,
-                        model = gigaChatModel
+                        model = gigaChatModel,
+                        enableMcp = true  // MCP активен по умолчанию
                     )
 
                     // Формируем ответ с информацией о токенах
                     val fullResponse = buildString {
-                        if (response.toolsUsed) {
-                            appendLine("⚡ MCP TOOLS АКТИВНЫ ⚡")
-                            appendLine()
-                        }
-                        appendLine("*** GigaChat T = $temperature ***")
                         appendLine(response.text)
                         appendLine()
-                        if (response.toolsUsed) {
-                            appendLine("▶ MCP инструменты использованы")
-                        }
                         appendLine("Отправлены токены: ${response.tokenUsage.promptTokens}")
                         appendLine("Получены токены: ${response.tokenUsage.completionTokens}")
                         appendLine("Оплачены токены: ${response.tokenUsage.totalTokens}")

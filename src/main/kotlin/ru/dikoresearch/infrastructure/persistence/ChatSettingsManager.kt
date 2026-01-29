@@ -93,7 +93,7 @@ class ChatSettingsManager(private val settingsDirectory: String = "chat_settings
      * Получить все chatId с сохраненными настройками
      */
     fun getAllChatIds(): List<Long> {
-        val chatIds = File(settingsDirectory).listFiles()
+        return File(settingsDirectory).listFiles()
             ?.mapNotNull { file ->
                 // Парсим имя файла: <chatId>_settings.json
                 val fileName = file.name
@@ -105,8 +105,5 @@ class ChatSettingsManager(private val settingsDirectory: String = "chat_settings
             }
             ?.sorted()
             ?: emptyList()
-
-        println("📂 ChatSettingsManager.getAllChatIds(): найдено ${chatIds.size} чатов: $chatIds")
-        return chatIds
     }
 }

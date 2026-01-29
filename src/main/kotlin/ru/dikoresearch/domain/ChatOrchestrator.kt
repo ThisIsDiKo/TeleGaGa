@@ -5,9 +5,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.dikoresearch.infrastructure.http.GigaChatClient
-import ru.dikoresearch.infrastructure.mcp.McpService
+import ru.dikoresearch.infrastructure.mcp.HttpMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
-import java.time.LocalDate
 
 /**
  * Оркестратор чат-логики - чистая бизнес-логика без зависимости от Telegram
@@ -16,7 +15,7 @@ import java.time.LocalDate
 class ChatOrchestrator(
     private val gigaClient: GigaChatClient,
     private val historyManager: ChatHistoryManager,
-    private val mcpService: McpService?
+    private val mcpService: HttpMcpService?
 ) {
     private val toolCallHandler = mcpService?.let { ToolCallHandler(it) }
     /**
@@ -48,20 +47,26 @@ class ChatOrchestrator(
         history.add(GigaChatMessage(role = "user", content = userMessage))
 
         // Получаем доступные MCP функции если включено
+        println("🔍 MCP Debug: enableMcp=$enableMcp, mcpService=${mcpService != null}, isAvailable=${mcpService?.isAvailable()}, toolCallHandler=${toolCallHandler != null}")
         val availableFunctions = if (enableMcp && mcpService?.isAvailable() == true && toolCallHandler != null) {
-            toolCallHandler.getAvailableFunctions()
+            val functions = toolCallHandler.getAvailableFunctions()
+            println("✅ MCP функции получены: ${functions.size} шт.")
+            functions
         } else {
+            println("❌ MCP функции НЕ получены (условие не выполнено)")
             null
         }
 
         // Добавляем chatId и текущую дату в контекст основного системного сообщения для MCP
         if (availableFunctions != null && history.isNotEmpty()) {
+            println("🔧 Добавляем контекст в системный промпт...")
             val originalSystemMessage = history[0]
 
-            // Получаем текущую дату
-            val currentDate = LocalDate.now()
-            val tomorrow = currentDate.plusDays(1)
-            val dayAfterTomorrow = currentDate.plusDays(2)
+            // Получаем текущую дату и время для контекста
+            val currentDateTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Moscow"))
+            val currentDate = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            val currentTime = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
+            val dayOfWeek = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale("ru")))
 
             val enhancedSystemMessage = GigaChatMessage(
                 role = "system",
@@ -69,27 +74,17 @@ class ChatOrchestrator(
                     append(originalSystemMessage.content)
                     appendLine()
                     appendLine()
-                    appendLine("ВАЖНО: Твой chatId = $chatId. ВСЕГДА используй этот chatId при вызове всех инструментов (create_reminder, get_reminders, delete_reminder).")
+                    appendLine("ВАЖНО: Твой chatId = $chatId. ВСЕГДА используй этот chatId при вызове всех инструментов.")
                     appendLine()
-                    appendLine("ТЕКУЩАЯ ДАТА:")
-                    appendLine("Сегодня: $currentDate")
-                    appendLine("Завтра: $tomorrow")
-                    appendLine("Послезавтра: $dayAfterTomorrow")
+                    appendLine("ТЕКУЩАЯ ДАТА И ВРЕМЯ (timezone: Europe/Moscow):")
+                    appendLine("- Дата: $currentDate ($dayOfWeek)")
+                    appendLine("- Время: $currentTime")
                     appendLine()
-                    appendLine("КРИТИЧЕСКИ ВАЖНО для create_reminder:")
-                    appendLine("Параметр dueDate должен содержать ТОЛЬКО дату в формате YYYY-MM-DD, БЕЗ времени!")
-                    appendLine("Время НЕ включать в dueDate! Время добавляй в параметр text.")
-                    appendLine()
-                    appendLine("Правильные примеры:")
-                    appendLine("✓ dueDate='$currentDate', text='В 23:00 позвонить на почту'")
-                    appendLine("✓ dueDate='$tomorrow', text='Купить молоко'")
-                    appendLine()
-                    appendLine("НЕПРАВИЛЬНЫЕ примеры (НЕ делай так!):")
-                    appendLine("✗ dueDate='$currentDate 23:00' - НЕТ! Время в dueDate запрещено!")
-                    appendLine("✗ dueDate='23:00' - НЕТ! dueDate это дата, а не время!")
+                    appendLine("При создании напоминаний используй эту дату как точку отсчёта для вычисления 'сегодня', 'завтра', 'послезавтра' и т.д.")
                 }
             )
             history[0] = enhancedSystemMessage
+            println("✅ Контекст добавлен")
         }
 
         // Основной цикл обработки с поддержкой tool calling
@@ -104,9 +99,11 @@ class ChatOrchestrator(
 
         while (continueProcessing && iterationCount < maxIterations) {
             iterationCount++
+            println("🔄 Итерация $iterationCount: отправка запроса в GigaChat...")
 
             // Получаем ответ от GigaChat
             val modelResponse = try {
+                println("📤 Вызов gigaClient.chatCompletion (functions=${availableFunctions?.size ?: 0})...")
                 gigaClient.chatCompletion(
                     model = model,
                     messages = history,
@@ -200,33 +197,8 @@ class ChatOrchestrator(
             null
         }
 
-        // Формируем итоговый ответ с результатами tool calls
-        val fullResponse = buildString {
-            if (toolExecutionResults.isNotEmpty()) {
-                appendLine("🔧 Использованы MCP инструменты:")
-                appendLine()
-                toolExecutionResults.forEach { (toolName, jsonResult) ->
-                    // Извлекаем текст из JSON результата {"result": "text"}
-                    val actualResult = try {
-                        val jsonElement = Json.parseToJsonElement(jsonResult)
-                        jsonElement.jsonObject["result"]?.jsonPrimitive?.content ?: jsonResult
-                    } catch (e: Exception) {
-                        // Если не JSON или ошибка парсинга - используем как есть
-                        jsonResult
-                    }
-
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine("🛠️ Инструмент: $toolName")
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine(actualResult)
-                    appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                    appendLine()
-                }
-                appendLine("💬 Итоговый ответ:")
-                appendLine()
-            }
-            append(finalAssistantMessage)
-        }
+        // Формируем итоговый ответ (без визуальных маркеров MCP)
+        val fullResponse = finalAssistantMessage
 
         // Обрезаем текст до лимита Telegram (3800 символов)
         val truncatedText = if (fullResponse.length > 3800) {

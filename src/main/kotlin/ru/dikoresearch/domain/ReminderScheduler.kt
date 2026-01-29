@@ -57,8 +57,6 @@ class ReminderScheduler(
         val currentTime = LocalTime.now()
         val currentDate = LocalDate.now()
 
-        println("⏰ ReminderScheduler: Проверка напоминаний в ${currentTime.hour}:${currentTime.minute.toString().padStart(2, '0')}")
-
         // Получить все чаты с включенными напоминаниями
         val chatsWithReminders = settingsManager.getAllChatIds()
             .mapNotNull { chatId ->
@@ -71,25 +69,17 @@ class ReminderScheduler(
             }
 
         if (chatsWithReminders.isEmpty()) {
-            println("⏰ Нет чатов с включенными напоминаниями")
             return
         }
-
-        println("⏰ Найдено чатов с напоминаниями: ${chatsWithReminders.size}")
 
         // Проверить каждый чат
         for ((chatId, settings) in chatsWithReminders) {
             try {
                 val reminderTime = LocalTime.parse(settings.reminderTime)
 
-                println("⏰ Чат $chatId: reminderTime=${settings.reminderTime}, lastSent=${settings.lastReminderSent}")
-                println("⏰ Текущее время: $currentTime, Время напоминания: $reminderTime")
-
                 if (shouldSendReminder(currentTime, reminderTime, settings.lastReminderSent, currentDate)) {
-                    println("✅ Условие выполнено! Отправляем напоминания для чата $chatId")
+                    println("✅ Отправка напоминаний для чата $chatId")
                     sendDailyReminders(chatId, settings)
-                } else {
-                    println("⏸️ Условие не выполнено для чата $chatId")
                 }
             } catch (e: Exception) {
                 println("❌ Ошибка при обработке напоминаний для чата $chatId: ${e.message}")
@@ -111,31 +101,24 @@ class ReminderScheduler(
         val timeMatches = currentTime.hour == reminderTime.hour &&
                 currentTime.minute == reminderTime.minute
 
-        println("   ⏰ Проверка времени: текущее ${currentTime.hour}:${currentTime.minute} == настроенное ${reminderTime.hour}:${reminderTime.minute} ? $timeMatches")
-
         if (!timeMatches) {
             return false
         }
 
         // Проверка что сегодня еще не отправляли
         if (lastSent == null) {
-            println("   ✅ lastSent = null, отправляем")
             return true
         }
 
         val lastSentDate = try {
             LocalDateTime.parse(lastSent).toLocalDate()
         } catch (e: Exception) {
-            println("   ⚠️ Не удалось распарсить lastSent: $lastSent, отправляем")
             // Если не удалось распарсить - считаем что еще не отправляли
             return true
         }
 
-        val shouldSend = lastSentDate.isBefore(currentDate)
-        println("   ⏰ lastSentDate=$lastSentDate, currentDate=$currentDate, shouldSend=$shouldSend")
-
         // Отправляем только если последняя отправка была раньше чем сегодня
-        return shouldSend
+        return lastSentDate.isBefore(currentDate)
     }
 
     /**
@@ -170,8 +153,8 @@ class ReminderScheduler(
                 Если дел нет - скажи об этом позитивно.
             """.trimIndent()
 
-            // Вызываем ChatOrchestrator для обработки через LLM + MCP
-            val response = chatOrchestrator.processMessage(
+            // Вызываем ChatOrchestrator для получения напоминаний
+            val remindersResponse = chatOrchestrator.processMessage(
                 chatId = chatId,
                 userMessage = promptMessage,
                 systemRole = systemRole,
@@ -179,11 +162,50 @@ class ReminderScheduler(
                 enableMcp = true     // Включить MCP для доступа к инструментам
             )
 
+            // Системный промпт для погоды
+            val weatherSystemRole = """
+                Ты - ассистент для получения погоды.
+                Используй get_weather для получения погоды в указанном городе.
+                Сформируй краткую сводку погоды (температура, ощущается как, описание, влажность, ветер).
+            """.trimIndent()
+
+            // Получаем погоду для Санкт-Петербурга
+            val weatherResponse = chatOrchestrator.processMessage(
+                chatId = chatId,
+                userMessage = "Используй get_weather для получения погоды в Санкт-Петербурге (lang=ru)",
+                systemRole = weatherSystemRole,
+                temperature = 0.3F,
+                enableMcp = true
+            )
+
+            // Системный промпт для шутки
+            val jokeSystemRole = """
+                Ты - ассистент для получения и перевода шуток.
+                Используй get_chuck_norris_joke для получения шутки на английском.
+                ОБЯЗАТЕЛЬНО переведи полученную шутку на русский язык естественно и с юмором.
+                Верни только переведенный текст шутки без лишних комментариев.
+            """.trimIndent()
+
+            // Получаем и переводим шутку про Чака Норриса
+            val jokeResponse = chatOrchestrator.processMessage(
+                chatId = chatId,
+                userMessage = "Используй get_chuck_norris_joke для получения шутки и переведи её на русский",
+                systemRole = jokeSystemRole,
+                temperature = 0.7F,
+                enableMcp = true
+            )
+
             // Формируем финальное сообщение
             val messageText = buildString {
                 appendLine("🌅 Доброе утро! Вот твои дела на сегодня:")
                 appendLine()
-                appendLine(response.text)
+                appendLine(remindersResponse.text)
+                appendLine()
+                appendLine("🌤️ Погода в Санкт-Петербурге:")
+                appendLine(weatherResponse.text)
+                appendLine()
+                appendLine("😄 Шутка дня от Чака Норриса:")
+                appendLine(jokeResponse.text)
             }
 
             // Отправляем в Telegram
@@ -197,8 +219,6 @@ class ReminderScheduler(
                 lastReminderSent = LocalDateTime.now().toString()
             )
             settingsManager.saveSettings(chatId, updatedSettings)
-
-            println("✅ Напоминания отправлены для чата $chatId")
 
         } catch (e: Exception) {
             println("❌ Ошибка при отправке напоминаний для чата $chatId: ${e.message}")

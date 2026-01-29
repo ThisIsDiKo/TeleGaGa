@@ -4,6 +4,7 @@ import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
+import io.ktor.client.plugins.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
@@ -21,7 +22,7 @@ import ru.dikoresearch.domain.ReminderScheduler
 import ru.dikoresearch.infrastructure.config.ConfigService
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
-import ru.dikoresearch.infrastructure.mcp.McpService
+import ru.dikoresearch.infrastructure.mcp.HttpMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
@@ -57,30 +58,44 @@ val AssistantRole = "Ты — эксперт \n" +
 val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
 
 val McpEnabledRole = """
-Ты - умный AI ассистент с доступом к инструментам для управления напоминаниями через Model Context Protocol (MCP).
+Ты - умный AI ассистент с доступом к инструментам через Model Context Protocol (MCP).
 
 Доступные инструменты:
-1. create_reminder - создать новое напоминание
-2. get_reminders - получить напоминания за период
-3. delete_reminder - удалить/завершить напоминание
+1. get_weather - получить текущую погоду для указанного города (использует wttr.in)
+2. create_reminder - создать напоминание (dueDate только YYYY-MM-DD)
+3. get_reminders - получить список напоминаний
+4. delete_reminder - удалить напоминание
+5. get_chuck_norris_joke - получить шутку про Чака Норриса на английском (переводи на русский!)
 
-ВАЖНЫЕ ПРАВИЛА для create_reminder:
-- Параметр dueDate ДОЛЖЕН быть в формате YYYY-MM-DD (только дата, без времени!)
-- Используй даты из контекста "ТЕКУЩАЯ ДАТА И ВРЕМЯ" который будет предоставлен
-- Время (например "в 23:00") включай в параметр text, а не в dueDate
-- Примеры правильных вызовов:
-  * "Напомни сегодня в 23:00 позвонить" -> dueDate="<сегодняшняя_дата>", text="В 23:00 позвонить"
-  * "Напомни завтра купить молоко" -> dueDate="<завтрашняя_дата>", text="Купить молоко"
+ВАЖНО для работы с напоминаниями:
+- Параметр dueDate должен содержать ТОЛЬКО дату в формате YYYY-MM-DD, БЕЗ времени
+- Время включай в параметр text напоминания
+- Текущая дата автоматически указана в системном сообщении выше
 
-Когда пользователь просит напомнить о чем-то, автоматически используй create_reminder.
-Когда спрашивает "что у меня на сегодня?" - используй get_reminders.
-Будь проактивным и полезным.
+ВАЖНО для шуток про Чака:
+- get_chuck_norris_joke возвращает шутку на английском языке
+- ВСЕГДА переводи шутку на русский перед показом пользователю
+- Переводи естественно и с юмором, сохраняя смысл
+
+Примеры:
+User: "Напомни мне завтра в 10:00 позвонить маме"
+Ты: Вызови create_reminder(chatId="...", dueDate="2026-01-30", text="В 10:00 позвонить маме")
+
+User: "Какая погода в Санкт-Петербурге?"
+Ты: Вызови get_weather(city="Санкт-Петербург", lang="ru")
+
+User: "Расскажи шутку про Чака"
+Ты:
+  1. Вызови get_chuck_norris_joke()
+  2. Переведи полученную шутку на русский и покажи пользователю
+
+Будь проактивным и полезным. Используй инструменты для точности.
 """.trimIndent()
 
 fun main() {
     // ApplicationScope для управления корутинами всего приложения
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    var mcpService: McpService? = null
+    var httpMcpService: HttpMcpService? = null
     var botService: TelegramBotService? = null
     var reminderScheduler: ReminderScheduler? = null
 
@@ -119,20 +134,28 @@ fun main() {
         val settingsManager = ChatSettingsManager()
         println("   ChatSettingsManager инициализирован\n")
 
-        // 6. Инициализация MCP сервиса (Reminders)
-        println("6. Инициализация Reminders MCP сервиса...")
-        mcpService = McpService("mcp-reminders-server/index.js")
+        // 6. Инициализация HTTP MCP сервисов
+        println("6. Инициализация HTTP MCP сервисов...")
+        val serverConfigs = listOf(
+            HttpMcpService.ServerConfig("weather", "mcp-weather-server", 3001),
+            HttpMcpService.ServerConfig("reminders", "mcp-reminders-server", 3002),
+            HttpMcpService.ServerConfig("chuck", "mcp-chuck-server", 3003)
+        )
+
+        httpMcpService = HttpMcpService(httpClient, serverConfigs)
         try {
             runBlocking {
-                mcpService!!.initialize()
+                httpMcpService!!.initialize()
             }
-            println("   ✅ MCP сервис инициализирован и готов к работе\n")
+            println("   ✅ Все MCP серверы запущены и подключены\n")
         } catch (e: Exception) {
-            println("   ⚠️ Не удалось запустить Reminders MCP сервер: ${e.message}")
+            println("   ⚠️ Не удалось запустить HTTP MCP серверы: ${e.message}")
             println("   💡 Для работы с MCP установите зависимости:")
+            println("      cd mcp-weather-server && npm install")
             println("      cd mcp-reminders-server && npm install")
+            println("      cd mcp-chuck-server && npm install")
             println("   Бот продолжит работу без MCP функций\n")
-            mcpService = null
+            httpMcpService = null
         }
 
         // 7. Создание Domain Layer
@@ -140,7 +163,7 @@ fun main() {
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
             historyManager = historyManager,
-            mcpService = mcpService
+            mcpService = httpMcpService
         )
         println("   ChatOrchestrator создан\n")
 
@@ -149,10 +172,10 @@ fun main() {
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
-            mcpService = mcpService,
+            mcpService = httpMcpService,
             settingsManager = settingsManager,
             applicationScope = applicationScope,
-            defaultSystemRole = SingleRole,
+            defaultSystemRole = McpEnabledRole,
             defaultTemperature = 0.87F,
             gigaChatModel = config.gigaChatModel
         )
@@ -201,14 +224,14 @@ fun main() {
         // Останавливаем Telegram бота
         botService?.stop()
 
-        // Останавливаем MCP сервис
+        // Останавливаем HTTP MCP сервисы
         try {
             runBlocking {
-                mcpService?.shutdown()
+                httpMcpService?.shutdown()
             }
-            println("MCP сервис остановлен")
+            println("HTTP MCP сервисы остановлены")
         } catch (e: Exception) {
-            println("Ошибка при остановке MCP сервиса: ${e.message}")
+            println("Ошибка при остановке HTTP MCP сервисов: ${e.message}")
         }
 
         println("=== Приложение завершено ===")
@@ -227,6 +250,13 @@ private fun createHttpClient(): HttpClient {
             json(json)
         }
         install(Logging)
+
+        // Увеличенные таймауты для работы с внешними API (например, wttr.in)
+        install(HttpTimeout) {
+            requestTimeoutMillis = 60000  // 60 секунд на весь запрос
+            connectTimeoutMillis = 10000  // 10 секунд на установку соединения
+            socketTimeoutMillis = 60000   // 60 секунд на чтение/запись
+        }
 
         // Из-за проблем с сертификатами минцифры, пришлось отключить их проверку
         engine {

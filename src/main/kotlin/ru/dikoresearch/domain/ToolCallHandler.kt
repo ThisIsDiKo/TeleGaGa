@@ -4,20 +4,18 @@ import GigaChatFunction
 import GigaChatFunctionCall
 import GigaChatFunctionParameters
 import GigaChatPropertySchema
-import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
-import io.modelcontextprotocol.kotlin.sdk.types.Tool
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import ru.dikoresearch.infrastructure.mcp.McpService
+import ru.dikoresearch.infrastructure.mcp.HttpMcpService
 
 /**
  * Обработчик вызовов инструментов от модели GigaChat через MCP
  * Преобразует MCP инструменты в формат GigaChat functions и выполняет их вызовы
  */
 class ToolCallHandler(
-    private val mcpService: McpService
+    private val mcpService: HttpMcpService
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -31,8 +29,8 @@ class ToolCallHandler(
         }
 
         return try {
-            val toolsResult = mcpService.listTools()
-            val functions = toolsResult.tools.map { tool ->
+            val tools = mcpService.listTools()
+            val functions = tools.map { tool ->
                 convertMcpToolToGigaChatFunction(tool)
             }
             println("Получено ${functions.size} инструментов от MCP сервера")
@@ -60,19 +58,8 @@ class ToolCallHandler(
             val arguments = parseArgumentsToMap(argumentsJsonElement)
             println("Распарсенные аргументы (Map): $arguments")
 
-            // Санитизация аргументов для create_reminder
-            val sanitizedArguments = if (toolName == "create_reminder") {
-                sanitizeReminderArguments(arguments)
-            } else {
-                arguments
-            }
-
-            if (sanitizedArguments != arguments) {
-                println("Аргументы после санитизации: $sanitizedArguments")
-            }
-
             // Вызываем MCP инструмент
-            val result = mcpService.callTool(toolName, sanitizedArguments)
+            val result = mcpService.callTool(toolName, arguments)
 
             // Логируем результат для отладки
             println("✅ Результат от MCP инструмента '$toolName':")
@@ -113,7 +100,7 @@ class ToolCallHandler(
     /**
      * Преобразует MCP Tool в GigaChat Function
      */
-    private fun convertMcpToolToGigaChatFunction(tool: Tool): GigaChatFunction {
+    private fun convertMcpToolToGigaChatFunction(tool: HttpMcpService.Tool): GigaChatFunction {
         println("\n=== Конвертация MCP Tool: ${tool.name} ===")
         println("Tool description: ${tool.description}")
         println("Tool inputSchema: ${tool.inputSchema}")
@@ -122,51 +109,49 @@ class ToolCallHandler(
         val required = mutableListOf<String>()
 
         // Преобразуем inputSchema в параметры функции
-        tool.inputSchema?.let { schema ->
-            try {
-                // ToolSchema имеет свойства properties и required
-                val schemaProperties = schema.properties
-                println("SchemaProperties: $schemaProperties")
+        try {
+            val schema = tool.inputSchema
+            val schemaProperties = schema["properties"] as? JsonObject
+            println("SchemaProperties: $schemaProperties")
 
-                schemaProperties?.forEach { (key, value) ->
-                    // value это JsonElement, парсим его в Map
-                    val propMap = when (value) {
-                        is JsonObject -> {
-                            value.entries.associate { it.key to it.value }
-                        }
-                        else -> null
+            schemaProperties?.forEach { (key, value) ->
+                // value это JsonElement, парсим его в Map
+                val propMap = when (value) {
+                    is JsonObject -> {
+                        value.entries.associate { it.key to it.value }
                     }
-
-                    if (propMap != null) {
-                        val typeElement = propMap["type"] as? JsonPrimitive
-                        val descElement = propMap["description"] as? JsonPrimitive
-                        val enumElement = propMap["enum"] as? JsonArray
-
-                        val propertySchema = GigaChatPropertySchema(
-                            type = typeElement?.content ?: "string",
-                            description = descElement?.content,
-                            enum = enumElement?.mapNotNull { (it as? JsonPrimitive)?.content }
-                        )
-                        properties[key] = propertySchema
-                        println("  Добавлено свойство: $key -> $propertySchema")
-                    }
+                    else -> null
                 }
 
-                // Извлекаем required поля
-                val schemaRequired = schema.required
-                println("SchemaRequired: $schemaRequired")
-                schemaRequired?.forEach { field ->
-                    required.add(field)
+                if (propMap != null) {
+                    val typeElement = propMap["type"] as? JsonPrimitive
+                    val descElement = propMap["description"] as? JsonPrimitive
+                    val enumElement = propMap["enum"] as? JsonArray
+
+                    val propertySchema = GigaChatPropertySchema(
+                        type = typeElement?.content ?: "string",
+                        description = descElement?.content,
+                        enum = enumElement?.mapNotNull { (it as? JsonPrimitive)?.content }
+                    )
+                    properties[key] = propertySchema
+                    println("  Добавлено свойство: $key -> $propertySchema")
                 }
-            } catch (e: Exception) {
-                println("Ошибка преобразования схемы для ${tool.name}: ${e.message}")
-                e.printStackTrace()
             }
+
+            // Извлекаем required поля
+            val schemaRequired = schema["required"] as? JsonArray
+            println("SchemaRequired: $schemaRequired")
+            schemaRequired?.forEach { field ->
+                (field as? JsonPrimitive)?.content?.let { required.add(it) }
+            }
+        } catch (e: Exception) {
+            println("Ошибка преобразования схемы для ${tool.name}: ${e.message}")
+            e.printStackTrace()
         }
 
         val gigaChatFunction = GigaChatFunction(
             name = tool.name,
-            description = tool.description ?: "MCP инструмент ${tool.name}",
+            description = tool.description,
             parameters = GigaChatFunctionParameters(
                 type = "object",
                 properties = properties,
@@ -217,64 +202,12 @@ class ToolCallHandler(
     }
 
     /**
-     * Санитизирует аргументы для create_reminder, обрезая время из dueDate если оно там есть
-     */
-    private fun sanitizeReminderArguments(arguments: Map<String, Any>): Map<String, Any> {
-        val dueDate = arguments["dueDate"] as? String ?: return arguments
-
-        // Если в dueDate есть время (пробел или 'T'), обрезаем до даты
-        val sanitizedDate = when {
-            dueDate.contains(" ") -> dueDate.substringBefore(" ")
-            dueDate.contains("T") -> dueDate.substringBefore("T")
-            else -> dueDate
-        }
-
-        if (sanitizedDate != dueDate) {
-            println("⚠️ Санитизация dueDate: '$dueDate' -> '$sanitizedDate'")
-
-            // Если время было в dueDate, добавляем его в text
-            val timeStr = when {
-                dueDate.contains(" ") -> dueDate.substringAfter(" ")
-                dueDate.contains("T") -> dueDate.substringAfter("T")
-                else -> null
-            }
-
-            val originalText = arguments["text"] as? String ?: ""
-            val updatedText = if (timeStr != null && originalText.isNotEmpty()) {
-                "В $timeStr $originalText"
-            } else if (timeStr != null) {
-                "В $timeStr"
-            } else {
-                originalText
-            }
-
-            return arguments.toMutableMap().apply {
-                put("dueDate", sanitizedDate)
-                if (updatedText != originalText) {
-                    put("text", updatedText)
-                    println("⚠️ Обновлен text: '$updatedText'")
-                }
-            }
-        }
-
-        return arguments
-    }
-
-    /**
      * Форматирует результат вызова инструмента в JSON для GigaChat
      * GigaChat требует, чтобы role=function содержал валидный JSON
      */
-    private fun formatToolResult(toolName: String, result: CallToolResult): String {
+    private fun formatToolResult(toolName: String, result: HttpMcpService.CallToolResponse): String {
         val contentText = result.content.joinToString("\n") { content ->
-            // Используем рефлексию для извлечения text из TextContent
-            try {
-                val textField = content::class.java.getDeclaredField("text")
-                textField.isAccessible = true
-                textField.get(content) as? String ?: content.toString()
-            } catch (e: Exception) {
-                // Если не удалось извлечь через рефлексию - используем toString
-                content.toString()
-            }
+            content.text
         }
 
         // Экранируем специальные символы для JSON
