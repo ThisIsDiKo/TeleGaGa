@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.mcp.HttpMcpService
+import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 
 /**
@@ -15,9 +16,10 @@ import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 class ChatOrchestrator(
     private val gigaClient: GigaChatClient,
     private val historyManager: ChatHistoryManager,
-    private val mcpService: HttpMcpService?
+    private val httpMcpService: HttpMcpService? = null,
+    private val stdioMcpService: StdioMcpService? = null
 ) {
-    private val toolCallHandler = mcpService?.let { ToolCallHandler(it) }
+    private val toolCallHandler = ToolCallHandler(httpMcpService, stdioMcpService)
     /**
      * Обрабатывает сообщение пользователя и возвращает ответ
      *
@@ -47,10 +49,14 @@ class ChatOrchestrator(
         history.add(GigaChatMessage(role = "user", content = userMessage))
 
         // Получаем доступные MCP функции если включено
-        println("🔍 MCP Debug: enableMcp=$enableMcp, mcpService=${mcpService != null}, isAvailable=${mcpService?.isAvailable()}, toolCallHandler=${toolCallHandler != null}")
-        val availableFunctions = if (enableMcp && mcpService?.isAvailable() == true && toolCallHandler != null) {
+        val httpAvailable = httpMcpService?.isAvailable() == true
+        val stdioAvailable = stdioMcpService?.isAvailable() == true
+        val anyMcpAvailable = httpAvailable || stdioAvailable
+
+        println("🔍 MCP Debug: enableMcp=$enableMcp, httpMcp=$httpAvailable, stdioMcp=$stdioAvailable, anyAvailable=$anyMcpAvailable")
+        val availableFunctions = if (enableMcp && anyMcpAvailable && toolCallHandler != null) {
             val functions = toolCallHandler.getAvailableFunctions()
-            println("✅ MCP функции получены: ${functions.size} шт.")
+            println("✅ MCP функции получены: ${functions.size} шт. (HTTP: $httpAvailable, Stdio: $stdioAvailable)")
             functions
         } else {
             println("❌ MCP функции НЕ получены (условие не выполнено)")
@@ -95,7 +101,7 @@ class ChatOrchestrator(
         var totalCompletionTokens = 0
         var totalTokensUsed = 0
         var iterationCount = 0
-        val maxIterations = 5 // Ограничиваем количество итераций tool calling
+        val maxIterations = 10 // Ограничиваем количество итераций tool calling
 
         while (continueProcessing && iterationCount < maxIterations) {
             iterationCount++

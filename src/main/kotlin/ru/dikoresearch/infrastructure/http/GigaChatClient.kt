@@ -45,9 +45,10 @@ class GigaChatClient(
                 functionCall = functionCall
             )
 
-            println("GigaChat Request: $requestBody")
             if (functions != null) {
-                println("Functions передано: ${functions.size} шт.")
+                println("📤 GigaChat запрос с ${functions.size} функциями")
+            } else {
+                println("📤 GigaChat запрос")
             }
 
             httpClient.post("$baseUrl/api/v1/chat/completions") {
@@ -72,15 +73,13 @@ class GigaChatClient(
             response = requestBlock(token)
         }
 
-        println(response.bodyAsText())
-
         val bodyText = response.bodyAsText()
         if (!response.status.isSuccess()) {
             throw IllegalStateException("GigaChat error: ${response.status}: $bodyText")
         }
 
         val parsed: GigaChatResponse = json.decodeFromString(bodyText)
-        println("Gigachat json parsed : $parsed")
+        println("📥 GigaChat ответ получен (${parsed.usage.totalTokens} токенов)")
 
         return parsed
     }

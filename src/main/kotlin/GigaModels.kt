@@ -118,7 +118,9 @@ data class GigaChatPropertySchema(
     val type: String, // "string", "number", "boolean", "array", "object"
     val description: String? = null,
     val enum: List<String>? = null,
-    val items: GigaChatPropertySchema? = null // для массивов
+    val items: GigaChatPropertySchema? = null, // для массивов
+    val properties: Map<String, GigaChatPropertySchema>? = null, // для объектов с известной структурой
+    val additionalProperties: GigaChatPropertySchema? = null // для словарей с произвольными ключами
 )
 
 /**

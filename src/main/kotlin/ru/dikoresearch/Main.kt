@@ -23,6 +23,7 @@ import ru.dikoresearch.infrastructure.config.ConfigService
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
 import ru.dikoresearch.infrastructure.mcp.HttpMcpService
+import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
@@ -58,44 +59,34 @@ val AssistantRole = "Ты — эксперт \n" +
 val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
 
 val McpEnabledRole = """
-Ты - умный AI ассистент с доступом к инструментам через Model Context Protocol (MCP).
+Docker помощник. Вызывай функции молча.
 
-Доступные инструменты:
-1. get_weather - получить текущую погоду для указанного города (использует wttr.in)
-2. create_reminder - создать напоминание (dueDate только YYYY-MM-DD)
-3. get_reminders - получить список напоминаний
-4. delete_reminder - удалить напоминание
-5. get_chuck_norris_joke - получить шутку про Чака Норриса на английском (переводи на русский!)
+Для "запусти caddy":
+- Функция: run_container
+- image: "caddy:latest"
+- name: "caddy"
+- ports: {"80": 80, "443": 443}
+- detach: true
 
-ВАЖНО для работы с напоминаниями:
-- Параметр dueDate должен содержать ТОЛЬКО дату в формате YYYY-MM-DD, БЕЗ времени
-- Время включай в параметр text напоминания
-- Текущая дата автоматически указана в системном сообщении выше
+Для "запусти nginx":
+- Функция: run_container
+- image: "nginx:latest"
+- name: "nginx"
+- ports: {"80": 80}
+- detach: true
 
-ВАЖНО для шуток про Чака:
-- get_chuck_norris_joke возвращает шутку на английском языке
-- ВСЕГДА переводи шутку на русский перед показом пользователю
-- Переводи естественно и с юмором, сохраняя смысл
+НЕ используй command, environment, volumes.
+НЕ используй create_container или recreate_container.
+Только run_container!
 
-Примеры:
-User: "Напомни мне завтра в 10:00 позвонить маме"
-Ты: Вызови create_reminder(chatId="...", dueDate="2026-01-30", text="В 10:00 позвонить маме")
-
-User: "Какая погода в Санкт-Петербурге?"
-Ты: Вызови get_weather(city="Санкт-Петербург", lang="ru")
-
-User: "Расскажи шутку про Чака"
-Ты:
-  1. Вызови get_chuck_norris_joke()
-  2. Переведи полученную шутку на русский и покажи пользователю
-
-Будь проактивным и полезным. Используй инструменты для точности.
+После запуска: ✅ Запущен
 """.trimIndent()
 
 fun main() {
     // ApplicationScope для управления корутинами всего приложения
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     var httpMcpService: HttpMcpService? = null
+    var stdioMcpService: StdioMcpService? = null
     var botService: TelegramBotService? = null
     var reminderScheduler: ReminderScheduler? = null
 
@@ -147,15 +138,39 @@ fun main() {
             runBlocking {
                 httpMcpService!!.initialize()
             }
-            println("   ✅ Все MCP серверы запущены и подключены\n")
+            println("   ✅ Все HTTP MCP серверы запущены и подключены\n")
         } catch (e: Exception) {
             println("   ⚠️ Не удалось запустить HTTP MCP серверы: ${e.message}")
             println("   💡 Для работы с MCP установите зависимости:")
             println("      cd mcp-weather-server && npm install")
             println("      cd mcp-reminders-server && npm install")
             println("      cd mcp-chuck-server && npm install")
-            println("   Бот продолжит работу без MCP функций\n")
+            println("   Бот продолжит работу без HTTP MCP функций\n")
             httpMcpService = null
+        }
+
+        // 6b. Инициализация Stdio MCP сервисов (Docker)
+        println("6b. Инициализация Stdio MCP сервисов (Docker)...")
+        val stdioServerConfigs = listOf(
+            StdioMcpService.ServerConfig(
+                name = "docker",
+                command = "/Users/dmitriikonovalov/.local/bin/mcp-server-docker",
+                args = emptyList()
+            )
+        )
+
+        stdioMcpService = StdioMcpService(stdioServerConfigs)
+        try {
+            runBlocking {
+                stdioMcpService!!.initialize()
+            }
+            println("   ✅ Все Stdio MCP серверы запущены и подключены\n")
+        } catch (e: Exception) {
+            println("   ⚠️ Не удалось запустить Stdio MCP серверы: ${e.message}")
+            println("   💡 Убедитесь, что Docker запущен и mcp-server-docker установлен:")
+            println("      pipx install mcp-server-docker")
+            println("   Бот продолжит работу без Docker функций\n")
+            stdioMcpService = null
         }
 
         // 7. Создание Domain Layer
@@ -163,7 +178,8 @@ fun main() {
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
             historyManager = historyManager,
-            mcpService = httpMcpService
+            httpMcpService = httpMcpService,
+            stdioMcpService = stdioMcpService
         )
         println("   ChatOrchestrator создан\n")
 
@@ -172,7 +188,8 @@ fun main() {
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
-            mcpService = httpMcpService,
+            httpMcpService = httpMcpService,
+            stdioMcpService = stdioMcpService,
             settingsManager = settingsManager,
             applicationScope = applicationScope,
             defaultSystemRole = McpEnabledRole,
@@ -232,6 +249,16 @@ fun main() {
             println("HTTP MCP сервисы остановлены")
         } catch (e: Exception) {
             println("Ошибка при остановке HTTP MCP сервисов: ${e.message}")
+        }
+
+        // Останавливаем Stdio MCP сервисы
+        try {
+            runBlocking {
+                stdioMcpService?.shutdown()
+            }
+            println("Stdio MCP сервисы остановлены")
+        } catch (e: Exception) {
+            println("Ошибка при остановке Stdio MCP сервисов: ${e.message}")
         }
 
         println("=== Приложение завершено ===")

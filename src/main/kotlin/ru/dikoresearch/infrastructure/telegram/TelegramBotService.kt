@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
 import ru.dikoresearch.infrastructure.mcp.HttpMcpService
+import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 
 /**
@@ -22,7 +23,8 @@ import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 class TelegramBotService(
     private val telegramToken: String,
     private val chatOrchestrator: ChatOrchestrator,
-    private val mcpService: HttpMcpService?,
+    private val httpMcpService: HttpMcpService?,
+    private val stdioMcpService: StdioMcpService?,
     private val settingsManager: ChatSettingsManager,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
@@ -101,18 +103,32 @@ class TelegramBotService(
             // Используем applicationScope.launch для вызова suspend функции
             applicationScope.launch {
                 try {
-                    if (mcpService == null) {
+                    val allTools = mutableListOf<String>()
+
+                    // Получаем инструменты от HTTP MCP сервиса
+                    if (httpMcpService?.isAvailable() == true) {
+                        val httpTools = httpMcpService.listTools()
+                        allTools.addAll(httpTools.map { "📡 HTTP: ${it.name}" })
+                    }
+
+                    // Получаем инструменты от Stdio MCP сервиса
+                    if (stdioMcpService?.isAvailable() == true) {
+                        val stdioTools = stdioMcpService.listTools()
+                        allTools.addAll(stdioTools.map { "🐳 Docker: ${it.name}" })
+                    }
+
+                    if (allTools.isEmpty()) {
                         bot.sendMessage(
                             chatId = ChatId.fromId(chatId),
-                            text = "MCP сервис недоступен. Запустите сервер: ./gradlew :mcp-chuck-server:run"
+                            text = "❌ MCP сервисы недоступны.\n" +
+                                    "HTTP: ${httpMcpService?.isAvailable()}\n" +
+                                    "Stdio: ${stdioMcpService?.isAvailable()}"
                         )
                         return@launch
                     }
 
-                    val mcpTools = mcpService.listTools()
-                    val toolNames = mcpTools.map { it.name }
-                    val message = "Доступные MCP инструменты (${toolNames.size}):\n" +
-                            toolNames.joinToString("\n") { "• $it" }
+                    val message = "Доступные MCP инструменты (${allTools.size}):\n\n" +
+                            allTools.joinToString("\n")
 
                     bot.sendMessage(
                         chatId = ChatId.fromId(chatId),
@@ -299,11 +315,16 @@ class TelegramBotService(
                         appendLine("• get_reminders - получение списка дел")
                         appendLine("• delete_reminder - удаление напоминаний")
                         appendLine("• get_chuck_norris_joke - шутки про Чака (перевожу на русский)")
+                        appendLine("• compose_create - создание Docker конфигурации")
+                        appendLine("• compose_apply - запуск Docker контейнеров")
+                        appendLine("• compose_down - остановка контейнеров")
+                        appendLine("• docker_ps - список запущенных контейнеров")
                         appendLine()
                         appendLine("Попробуй:")
                         appendLine("\"Какая погода в Санкт-Петербурге?\"")
                         appendLine("\"Напомни мне завтра купить молоко\"")
                         appendLine("\"Что у меня на сегодня?\"")
+                        appendLine("\"Запусти Caddy сервер\"")
                     }
                 )
                 println("MCP режим включен для чата $chatId")
