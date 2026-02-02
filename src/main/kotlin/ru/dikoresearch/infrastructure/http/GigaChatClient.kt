@@ -1,10 +1,13 @@
 package ru.dikoresearch.infrastructure.http
 
 import GigaChatChatRequest
+import GigaChatEmbeddingRequest
+import GigaChatEmbeddingResponse
 import GigaChatFunction
 import GigaChatMessage
 import GigaChatResponse
 import io.ktor.client.*
+import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.statement.*
@@ -60,6 +63,29 @@ class GigaChatClient(
         }
     }
 
+    suspend fun embeddings(
+        texts: List<String>,
+        model: String = "Embeddings"
+    ): GigaChatEmbeddingResponse {
+        return callWithTokenRetryEmbeddings { token ->
+            val rqUID = UUID.randomUUID().toString()
+
+            val requestBody = GigaChatEmbeddingRequest(
+                model = model,
+                input = texts
+            )
+
+            println("📤 GigaChat embeddings запрос для ${texts.size} текстов")
+
+            httpClient.post("$baseUrl/api/v1/embeddings") {
+                contentType(ContentType.Application.Json)
+                bearerAuth(token)
+                header("RqUID", rqUID)
+                setBody(requestBody)
+            }
+        }
+    }
+
     private suspend fun callWithTokenRetry(
         requestBlock: suspend (token: String) -> HttpResponse
     ): GigaChatResponse {
@@ -80,6 +106,30 @@ class GigaChatClient(
 
         val parsed: GigaChatResponse = json.decodeFromString(bodyText)
         println("📥 GigaChat ответ получен (${parsed.usage.totalTokens} токенов)")
+
+        return parsed
+    }
+
+    private suspend fun callWithTokenRetryEmbeddings(
+        requestBlock: suspend (token: String) -> HttpResponse
+    ): GigaChatEmbeddingResponse {
+        var token = getOrRequestToken()
+
+        var response = requestBlock(token)
+
+        if (response.status == HttpStatusCode.Unauthorized) {
+            println("GigaChat: got 401, refreshing access token")
+            token = refreshTokenForce()
+            response = requestBlock(token)
+        }
+
+        val bodyText = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw IllegalStateException("GigaChat embeddings error: ${response.status}: $bodyText")
+        }
+
+        val parsed: GigaChatEmbeddingResponse = json.decodeFromString(bodyText)
+        println("📥 GigaChat embeddings ответ получен (${parsed.data.size} embeddings)")
 
         return parsed
     }

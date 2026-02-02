@@ -18,15 +18,17 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import ru.dikoresearch.domain.ChatOrchestrator
-import ru.dikoresearch.domain.ReminderScheduler
+import ru.dikoresearch.domain.MarkdownPreprocessor
+import ru.dikoresearch.domain.TextChunker
 import ru.dikoresearch.infrastructure.config.ConfigService
+import ru.dikoresearch.infrastructure.embeddings.EmbeddingService
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
-import ru.dikoresearch.infrastructure.mcp.HttpMcpService
-import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
+import ru.dikoresearch.infrastructure.persistence.EmbeddingsManager
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
+import java.io.File
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
 
@@ -85,10 +87,7 @@ Docker помощник. Вызывай функции молча.
 fun main() {
     // ApplicationScope для управления корутинами всего приложения
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    var httpMcpService: HttpMcpService? = null
-    var stdioMcpService: StdioMcpService? = null
     var botService: TelegramBotService? = null
-    var reminderScheduler: ReminderScheduler? = null
 
     try {
         println("=== Запуск TeleGaGa бота ===\n")
@@ -125,61 +124,33 @@ fun main() {
         val settingsManager = ChatSettingsManager()
         println("   ChatSettingsManager инициализирован\n")
 
-        // 6. Инициализация HTTP MCP сервисов
-        println("6. Инициализация HTTP MCP сервисов...")
-        val serverConfigs = listOf(
-            HttpMcpService.ServerConfig("weather", "mcp-weather-server", 3001),
-            HttpMcpService.ServerConfig("reminders", "mcp-reminders-server", 3002),
-            HttpMcpService.ServerConfig("chuck", "mcp-chuck-server", 3003)
+        // 6. Инициализация RAG сервисов
+        println("6. Инициализация RAG сервисов...")
+        val markdownPreprocessor = MarkdownPreprocessor()
+        val textChunker = TextChunker(chunkSize = 200, overlap = 50)
+        val embeddingService = EmbeddingService(
+            gigaChatClient = null, // GigaChat требует пакеты
+            ollamaClient = ollamaClient, // Используем Ollama (бесплатно)
+            textChunker = textChunker,
+            markdownPreprocessor = markdownPreprocessor,
+            batchSize = 15,
+            useOllama = true // По умолчанию используем Ollama
         )
+        val embeddingsManager = EmbeddingsManager()
 
-        httpMcpService = HttpMcpService(httpClient, serverConfigs)
-        try {
-            runBlocking {
-                httpMcpService!!.initialize()
-            }
-            println("   ✅ Все HTTP MCP серверы запущены и подключены\n")
-        } catch (e: Exception) {
-            println("   ⚠️ Не удалось запустить HTTP MCP серверы: ${e.message}")
-            println("   💡 Для работы с MCP установите зависимости:")
-            println("      cd mcp-weather-server && npm install")
-            println("      cd mcp-reminders-server && npm install")
-            println("      cd mcp-chuck-server && npm install")
-            println("   Бот продолжит работу без HTTP MCP функций\n")
-            httpMcpService = null
+        // Создаем папку для RAG документов
+        val ragDocsDir = File("rag_docs")
+        if (!ragDocsDir.exists()) {
+            ragDocsDir.mkdirs()
+            println("   📁 Создана папка rag_docs")
         }
-
-        // 6b. Инициализация Stdio MCP сервисов (Docker)
-        println("6b. Инициализация Stdio MCP сервисов (Docker)...")
-        val stdioServerConfigs = listOf(
-            StdioMcpService.ServerConfig(
-                name = "docker",
-                command = "/Users/dmitriikonovalov/.local/bin/mcp-server-docker",
-                args = emptyList()
-            )
-        )
-
-        stdioMcpService = StdioMcpService(stdioServerConfigs)
-        try {
-            runBlocking {
-                stdioMcpService!!.initialize()
-            }
-            println("   ✅ Все Stdio MCP серверы запущены и подключены\n")
-        } catch (e: Exception) {
-            println("   ⚠️ Не удалось запустить Stdio MCP серверы: ${e.message}")
-            println("   💡 Убедитесь, что Docker запущен и mcp-server-docker установлен:")
-            println("      pipx install mcp-server-docker")
-            println("   Бот продолжит работу без Docker функций\n")
-            stdioMcpService = null
-        }
+        println("   ✅ RAG сервисы инициализированы (Ollama embeddings + Markdown preprocessor)\n")
 
         // 7. Создание Domain Layer
         println("7. Создание ChatOrchestrator...")
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
-            historyManager = historyManager,
-            httpMcpService = httpMcpService,
-            stdioMcpService = stdioMcpService
+            historyManager = historyManager
         )
         println("   ChatOrchestrator создан\n")
 
@@ -188,11 +159,12 @@ fun main() {
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
-            httpMcpService = httpMcpService,
-            stdioMcpService = stdioMcpService,
             settingsManager = settingsManager,
+            embeddingService = embeddingService,
+            embeddingsManager = embeddingsManager,
+            textChunker = textChunker,
             applicationScope = applicationScope,
-            defaultSystemRole = McpEnabledRole,
+            defaultSystemRole = AssistantRole,
             defaultTemperature = 0.87F,
             gigaChatModel = config.gigaChatModel
         )
@@ -208,18 +180,7 @@ fun main() {
         botService.start()
         println("   TelegramBot запущен\n")
 
-        // 11. Создание и запуск ReminderScheduler
-        println("11. Создание ReminderScheduler...")
-        reminderScheduler = ReminderScheduler(
-            settingsManager = settingsManager,
-            chatOrchestrator = chatOrchestrator,
-            telegramBot = botService.bot,
-            applicationScope = applicationScope
-        )
-        reminderScheduler.start()
-        println("   ReminderScheduler запущен\n")
-
-        println("=== TeleGaGa бот успешно запущен ===")
+        println("=== TeleGaGa бот с RAG успешно запущен ===")
         println("Для остановки нажмите Enter\n")
 
         // Блокируем main поток до получения Enter
@@ -231,35 +192,12 @@ fun main() {
     } finally {
         println("\n=== Начинается graceful shutdown ===")
 
-        // Останавливаем ReminderScheduler
-        reminderScheduler?.stop()
-
         // Отменяем все корутины в applicationScope
         applicationScope.cancel()
         println("ApplicationScope отменен")
 
         // Останавливаем Telegram бота
         botService?.stop()
-
-        // Останавливаем HTTP MCP сервисы
-        try {
-            runBlocking {
-                httpMcpService?.shutdown()
-            }
-            println("HTTP MCP сервисы остановлены")
-        } catch (e: Exception) {
-            println("Ошибка при остановке HTTP MCP сервисов: ${e.message}")
-        }
-
-        // Останавливаем Stdio MCP сервисы
-        try {
-            runBlocking {
-                stdioMcpService?.shutdown()
-            }
-            println("Stdio MCP сервисы остановлены")
-        } catch (e: Exception) {
-            println("Ошибка при остановке Stdio MCP сервисов: ${e.message}")
-        }
 
         println("=== Приложение завершено ===")
     }

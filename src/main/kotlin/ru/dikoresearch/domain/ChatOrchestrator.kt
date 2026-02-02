@@ -1,12 +1,7 @@
 package ru.dikoresearch.domain
 
 import GigaChatMessage
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import ru.dikoresearch.infrastructure.http.GigaChatClient
-import ru.dikoresearch.infrastructure.mcp.HttpMcpService
-import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 
 /**
@@ -15,11 +10,8 @@ import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
  */
 class ChatOrchestrator(
     private val gigaClient: GigaChatClient,
-    private val historyManager: ChatHistoryManager,
-    private val httpMcpService: HttpMcpService? = null,
-    private val stdioMcpService: StdioMcpService? = null
+    private val historyManager: ChatHistoryManager
 ) {
-    private val toolCallHandler = ToolCallHandler(httpMcpService, stdioMcpService)
     /**
      * Обрабатывает сообщение пользователя и возвращает ответ
      *
@@ -28,7 +20,6 @@ class ChatOrchestrator(
      * @param systemRole системный промпт для чата
      * @param temperature температура модели (0.0 - 1.0)
      * @param model название модели GigaChat
-     * @param enableMcp включить поддержку MCP инструментов (по умолчанию true)
      * @return ответ с текстом и информацией об использовании токенов
      */
     suspend fun processMessage(
@@ -36,162 +27,34 @@ class ChatOrchestrator(
         userMessage: String,
         systemRole: String,
         temperature: Float,
-        model: String = "GigaChat",
-        enableMcp: Boolean = true
+        model: String = "GigaChat"
     ): ChatResponse {
         // Получаем или создаем историю для текущего чата
         val history = loadOrCreateHistory(chatId, systemRole)
 
-        // Сохраняем оригинальное системное сообщение для восстановления после обработки
-        val originalSystemMessage = if (history.isNotEmpty()) history[0] else null
-
         // Добавляем сообщение пользователя в историю
         history.add(GigaChatMessage(role = "user", content = userMessage))
 
-        // Получаем доступные MCP функции если включено
-        val httpAvailable = httpMcpService?.isAvailable() == true
-        val stdioAvailable = stdioMcpService?.isAvailable() == true
-        val anyMcpAvailable = httpAvailable || stdioAvailable
-
-        println("🔍 MCP Debug: enableMcp=$enableMcp, httpMcp=$httpAvailable, stdioMcp=$stdioAvailable, anyAvailable=$anyMcpAvailable")
-        val availableFunctions = if (enableMcp && anyMcpAvailable && toolCallHandler != null) {
-            val functions = toolCallHandler.getAvailableFunctions()
-            println("✅ MCP функции получены: ${functions.size} шт. (HTTP: $httpAvailable, Stdio: $stdioAvailable)")
-            functions
-        } else {
-            println("❌ MCP функции НЕ получены (условие не выполнено)")
-            null
-        }
-
-        // Добавляем chatId и текущую дату в контекст основного системного сообщения для MCP
-        if (availableFunctions != null && history.isNotEmpty()) {
-            println("🔧 Добавляем контекст в системный промпт...")
-            val originalSystemMessage = history[0]
-
-            // Получаем текущую дату и время для контекста
-            val currentDateTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Moscow"))
-            val currentDate = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-            val currentTime = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"))
-            val dayOfWeek = currentDateTime.format(java.time.format.DateTimeFormatter.ofPattern("EEEE", java.util.Locale("ru")))
-
-            val enhancedSystemMessage = GigaChatMessage(
-                role = "system",
-                content = buildString {
-                    append(originalSystemMessage.content)
-                    appendLine()
-                    appendLine()
-                    appendLine("ВАЖНО: Твой chatId = $chatId. ВСЕГДА используй этот chatId при вызове всех инструментов.")
-                    appendLine()
-                    appendLine("ТЕКУЩАЯ ДАТА И ВРЕМЯ (timezone: Europe/Moscow):")
-                    appendLine("- Дата: $currentDate ($dayOfWeek)")
-                    appendLine("- Время: $currentTime")
-                    appendLine()
-                    appendLine("При создании напоминаний используй эту дату как точку отсчёта для вычисления 'сегодня', 'завтра', 'послезавтра' и т.д.")
-                }
+        // Получаем ответ от GigaChat (без MCP функций)
+        val modelResponse = try {
+            println("📤 Вызов gigaClient.chatCompletion...")
+            gigaClient.chatCompletion(
+                model = model,
+                messages = history,
+                temperature = temperature
             )
-            history[0] = enhancedSystemMessage
-            println("✅ Контекст добавлен")
+        } catch (e: Exception) {
+            println("GigaChat error: ${e}")
+            throw ChatException("Ошибка при обращении к GigaChat LLM", e)
         }
 
-        // Основной цикл обработки с поддержкой tool calling
-        var continueProcessing = true
-        var finalAssistantMessage = ""
-        val toolExecutionResults = mutableListOf<Pair<String, String>>() // Пара (имя_инструмента, результат)
-        var totalPromptTokens = 0
-        var totalCompletionTokens = 0
-        var totalTokensUsed = 0
-        var iterationCount = 0
-        val maxIterations = 10 // Ограничиваем количество итераций tool calling
+        val choice = modelResponse.choices.firstOrNull()
+            ?: throw ChatException("Пустой ответ от модели")
 
-        while (continueProcessing && iterationCount < maxIterations) {
-            iterationCount++
-            println("🔄 Итерация $iterationCount: отправка запроса в GigaChat...")
+        val assistantMessage = choice.message.content
 
-            // Получаем ответ от GigaChat
-            val modelResponse = try {
-                println("📤 Вызов gigaClient.chatCompletion (functions=${availableFunctions?.size ?: 0})...")
-                gigaClient.chatCompletion(
-                    model = model,
-                    messages = history,
-                    temperature = temperature,
-                    functions = availableFunctions,
-                    functionCall = if (availableFunctions != null) "auto" else null
-                )
-            } catch (e: Exception) {
-                println("GigaChat error: ${e}")
-                throw ChatException("Ошибка при обращении к GigaChat LLM", e)
-            }
-
-            // Накапливаем токены
-            totalPromptTokens += modelResponse.usage.promptTokens
-            totalCompletionTokens += modelResponse.usage.completionTokens
-            totalTokensUsed += modelResponse.usage.totalTokens
-
-            val choice = modelResponse.choices.firstOrNull()
-                ?: throw ChatException("Пустой ответ от модели")
-
-            val message = choice.message
-
-            // Проверяем, есть ли function_call в ответе
-            if (message.functionCall != null && choice.finishReason == "function_call" && toolCallHandler != null) {
-                println("Модель запросила вызов функции: ${message.functionCall.name}")
-
-                // Выполняем вызов функции через MCP
-                val executionResult = toolCallHandler.executeFunctionCall(message.functionCall)
-
-                // Сохраняем имя инструмента и результат для отображения пользователю
-                toolExecutionResults.add(executionResult.toolName to executionResult.result)
-
-                // Добавляем в историю запрос функции от ассистента
-                history.add(
-                    GigaChatMessage(
-                        role = "assistant",
-                        content = message.content,
-                        functionCall = message.functionCall
-                    )
-                )
-
-                // Добавляем в историю результат функции (всегда в формате JSON)
-                history.add(
-                    GigaChatMessage(
-                        role = "function",
-                        content = if (executionResult.success) {
-                            executionResult.result
-                        } else {
-                            // Ошибка тоже должна быть в JSON формате
-                            val errorMsg = executionResult.error ?: "Unknown error"
-                            val escapedError = errorMsg
-                                .replace("\\", "\\\\")
-                                .replace("\"", "\\\"")
-                                .replace("\n", "\\n")
-                                .replace("\r", "\\r")
-                                .replace("\t", "\\t")
-                            """{"error": "$escapedError"}"""
-                        }
-                    )
-                )
-
-                // Продолжаем цикл, чтобы модель обработала результат
-                continueProcessing = true
-            } else {
-                // Модель вернула обычный текстовый ответ
-                finalAssistantMessage = message.content
-
-                // Добавляем ответ ассистента в историю
-                history.add(GigaChatMessage(role = "assistant", content = finalAssistantMessage))
-
-                continueProcessing = false
-            }
-        }
-
-        if (iterationCount >= maxIterations) {
-            println("Достигнут лимит итераций tool calling: $maxIterations")
-        }
-
-        // Восстанавливаем оригинальное системное сообщение перед сохранением
-        if (availableFunctions != null && originalSystemMessage != null && history.isNotEmpty()) {
-            history[0] = originalSystemMessage
-        }
+        // Добавляем ответ ассистента в историю
+        history.add(GigaChatMessage(role = "assistant", content = assistantMessage))
 
         // Сохраняем историю
         historyManager.saveHistory(chatId, history)
@@ -203,26 +66,23 @@ class ChatOrchestrator(
             null
         }
 
-        // Формируем итоговый ответ (без визуальных маркеров MCP)
-        val fullResponse = finalAssistantMessage
-
         // Обрезаем текст до лимита Telegram (3800 символов)
-        val truncatedText = if (fullResponse.length > 3800) {
-            fullResponse.take(3799) + "..."
+        val truncatedText = if (assistantMessage.length > 3800) {
+            assistantMessage.take(3799) + "..."
         } else {
-            fullResponse
+            assistantMessage
         }
 
         return ChatResponse(
             text = truncatedText,
             tokenUsage = TokenUsage(
-                promptTokens = totalPromptTokens,
-                completionTokens = totalCompletionTokens,
-                totalTokens = totalTokensUsed
+                promptTokens = modelResponse.usage.promptTokens,
+                completionTokens = modelResponse.usage.completionTokens,
+                totalTokens = modelResponse.usage.totalTokens
             ),
             temperature = temperature,
             summaryMessage = summaryMessage,
-            toolsUsed = toolExecutionResults.isNotEmpty()
+            toolsUsed = false
         )
     }
 

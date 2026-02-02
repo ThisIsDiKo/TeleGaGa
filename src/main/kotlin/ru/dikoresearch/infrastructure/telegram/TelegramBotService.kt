@@ -7,14 +7,17 @@ import com.github.kotlintelegrambot.dispatcher.Dispatcher
 import com.github.kotlintelegrambot.dispatcher.command
 import com.github.kotlintelegrambot.dispatcher.message
 import com.github.kotlintelegrambot.entities.ChatId
+import com.github.kotlintelegrambot.entities.ParseMode
 import com.github.kotlintelegrambot.extensions.filters.Filter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
-import ru.dikoresearch.infrastructure.mcp.HttpMcpService
-import ru.dikoresearch.infrastructure.mcp.StdioMcpService
+import ru.dikoresearch.domain.TextChunker
+import ru.dikoresearch.infrastructure.embeddings.EmbeddingService
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
+import ru.dikoresearch.infrastructure.persistence.EmbeddingsManager
+import java.io.File
 
 /**
  * Сервис для управления Telegram ботом
@@ -23,9 +26,10 @@ import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 class TelegramBotService(
     private val telegramToken: String,
     private val chatOrchestrator: ChatOrchestrator,
-    private val httpMcpService: HttpMcpService?,
-    private val stdioMcpService: StdioMcpService?,
     private val settingsManager: ChatSettingsManager,
+    private val embeddingService: EmbeddingService,
+    private val embeddingsManager: EmbeddingsManager,
+    private val textChunker: TextChunker,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
@@ -71,20 +75,20 @@ class TelegramBotService(
             bot.sendMessage(
                 chatId = ChatId.fromId(chatId),
                 text = buildString {
-                    appendLine("Привет! Я TeleGaGa бот на основе GigaChat с поддержкой MCP инструментов.")
+                    appendLine("👋 Привет! Я TeleGaGa бот с поддержкой RAG.")
                     appendLine()
-                    appendLine("Доступные команды:")
+                    appendLine("🤖 AI модели:")
+                    appendLine("• GigaChat - основная модель для чата")
+                    appendLine("• Ollama (nomic-embed-text) - локальные embeddings")
+                    appendLine()
+                    appendLine("📋 Доступные команды:")
                     appendLine("/changeRole <текст> - изменить системный промпт")
-                    appendLine("/changeT <число> - изменить температуру модели (0.0-1.0)")
+                    appendLine("/changeT <число> - изменить температуру (0.0-1.0)")
                     appendLine("/clearChat - очистить историю чата")
+                    appendLine("/createEmbeddings - создать embeddings из rag_docs/readme.md")
                     appendLine()
-                    appendLine("MCP инструменты:")
-                    appendLine("/enableMcp - включить MCP режим с доступом к инструментам")
-                    appendLine("/listTools - показать доступные MCP инструменты")
-                    appendLine()
-                    appendLine("📅 Управление напоминаниями:")
-                    appendLine("/setReminderTime HH:mm - настроить время ежедневных напоминаний")
-                    appendLine("/disableReminders - отключить автоматические напоминания")
+                    appendLine("💡 Для работы embeddings нужна запущенная Ollama:")
+                    appendLine("ollama pull nomic-embed-text")
                 }
             )
         }
@@ -97,51 +101,12 @@ class TelegramBotService(
             )
         }
 
+        // MCP commands removed - no longer needed for RAG implementation
+        /*
         command("listTools") {
-            val chatId = message.chat.id
-
-            // Используем applicationScope.launch для вызова suspend функции
-            applicationScope.launch {
-                try {
-                    val allTools = mutableListOf<String>()
-
-                    // Получаем инструменты от HTTP MCP сервиса
-                    if (httpMcpService?.isAvailable() == true) {
-                        val httpTools = httpMcpService.listTools()
-                        allTools.addAll(httpTools.map { "📡 HTTP: ${it.name}" })
-                    }
-
-                    // Получаем инструменты от Stdio MCP сервиса
-                    if (stdioMcpService?.isAvailable() == true) {
-                        val stdioTools = stdioMcpService.listTools()
-                        allTools.addAll(stdioTools.map { "🐳 Docker: ${it.name}" })
-                    }
-
-                    if (allTools.isEmpty()) {
-                        bot.sendMessage(
-                            chatId = ChatId.fromId(chatId),
-                            text = "❌ MCP сервисы недоступны.\n" +
-                                    "HTTP: ${httpMcpService?.isAvailable()}\n" +
-                                    "Stdio: ${stdioMcpService?.isAvailable()}"
-                        )
-                        return@launch
-                    }
-
-                    val message = "Доступные MCP инструменты (${allTools.size}):\n\n" +
-                            allTools.joinToString("\n")
-
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = message
-                    )
-                } catch (e: Exception) {
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = "Ошибка при получении списка инструментов: ${e.message}"
-                    )
-                }
-            }
+            ...
         }
+        */
 
         command("changeRole") {
             val chatId = message.chat.id
@@ -229,110 +194,108 @@ class TelegramBotService(
             }
         }
 
-        command("setReminderTime") {
-            val chatId = message.chat.id
-            val timeStr = args.joinToString(" ")
+        // MCP commands removed for RAG implementation
+        /*
+        command("setReminderTime") { ... }
+        command("disableReminders") { ... }
+        command("enableMcp") { ... }
+        */
 
-            // Валидация формата HH:mm
-            val timePattern = Regex("^([01]\\d|2[0-3]):([0-5]\\d)$")
-            if (!timePattern.matches(timeStr)) {
-                bot.sendMessage(
-                    chatId = ChatId.fromId(chatId),
-                    text = "❌ Неверный формат времени. Используйте HH:mm (например, 09:00)"
-                )
-                return@command
-            }
-
-            applicationScope.launch {
-                try {
-                    val settings = settingsManager.loadSettings(chatId)
-                    val updatedSettings = settings.copy(
-                        reminderTime = timeStr,
-                        reminderEnabled = true
-                    )
-                    settingsManager.saveSettings(chatId, updatedSettings)
-
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = buildString {
-                            appendLine("⏰ Напоминания будут приходить ежедневно в $timeStr")
-                            appendLine()
-                            appendLine("Теперь вы можете добавлять напоминания через диалог:")
-                            appendLine("\"Напомни мне завтра купить молоко\"")
-                            appendLine()
-                            appendLine("💡 Для работы с напоминаниями включите MCP режим командой /enableMcp")
-                        }
-                    )
-                    println("✅ Время напоминаний установлено для чата $chatId: $timeStr")
-                } catch (e: Exception) {
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = "❌ Ошибка при настройке напоминаний: ${e.message}"
-                    )
-                }
-            }
-        }
-
-        command("disableReminders") {
+        command("createEmbeddings") {
             val chatId = message.chat.id
 
             applicationScope.launch {
                 try {
-                    val settings = settingsManager.loadSettings(chatId)
-                    val updatedSettings = settings.copy(reminderEnabled = false)
-                    settingsManager.saveSettings(chatId, updatedSettings)
-
                     bot.sendMessage(
                         chatId = ChatId.fromId(chatId),
-                        text = "🔕 Автоматические напоминания отключены"
+                        text = "🦙 Начинаю генерацию embeddings из файла rag_docs/readme.md...\n" +
+                               "(используется локальная модель Ollama)"
                     )
-                    println("✅ Напоминания отключены для чата $chatId")
-                } catch (e: Exception) {
-                    bot.sendMessage(
-                        chatId = ChatId.fromId(chatId),
-                        text = "❌ Ошибка: ${e.message}"
-                    )
-                }
-            }
-        }
 
-        command("enableMcp") {
-            val chatId = message.chat.id
-
-            try {
-                // Используем McpEnabledRole из Main.kt
-                val mcpRole = ru.dikoresearch.McpEnabledRole
-                chatOrchestrator.updateSystemRole(chatId, mcpRole)
-
-                bot.sendMessage(
-                    chatId = ChatId.fromId(chatId),
-                    text = buildString {
-                        appendLine("⚡ MCP режим активирован!")
-                        appendLine()
-                        appendLine("Теперь у меня есть доступ к инструментам:")
-                        appendLine("• get_weather - погода в любом городе")
-                        appendLine("• create_reminder - создание напоминаний")
-                        appendLine("• get_reminders - получение списка дел")
-                        appendLine("• delete_reminder - удаление напоминаний")
-                        appendLine("• get_chuck_norris_joke - шутки про Чака (перевожу на русский)")
-                        appendLine("• compose_create - создание Docker конфигурации")
-                        appendLine("• compose_apply - запуск Docker контейнеров")
-                        appendLine("• compose_down - остановка контейнеров")
-                        appendLine("• docker_ps - список запущенных контейнеров")
-                        appendLine()
-                        appendLine("Попробуй:")
-                        appendLine("\"Какая погода в Санкт-Петербурге?\"")
-                        appendLine("\"Напомни мне завтра купить молоко\"")
-                        appendLine("\"Что у меня на сегодня?\"")
-                        appendLine("\"Запусти Caddy сервер\"")
+                    // Читаем файл
+                    val file = File("rag_docs/readme.md")
+                    if (!file.exists()) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "❌ Ошибка: файл rag_docs/readme.md не найден.\n\n" +
+                                   "Создайте папку rag_docs и поместите туда readme.md"
+                        )
+                        return@launch
                     }
-                )
-                println("MCP режим включен для чата $chatId")
-            } catch (e: Exception) {
-                bot.sendMessage(
-                    chatId = ChatId.fromId(chatId),
-                    text = "Ошибка при включении MCP режима: ${e.message}"
-                )
+
+                    val originalText = file.readText()
+                    val startTime = System.currentTimeMillis()
+
+                    // Генерируем embeddings с предобработкой Markdown
+                    // (удаление код-блоков, разбиение на абзацы)
+                    val embeddings = embeddingService.generateEmbeddingsForMarkdown(originalText)
+
+                    val endTime = System.currentTimeMillis()
+                    val durationSeconds = (endTime - startTime) / 1000.0
+
+                    // Сохраняем в JSON
+                    val outputPath = embeddingsManager.saveEmbeddings(
+                        fileName = "readme",
+                        embeddings = embeddings,
+                        chunkSize = textChunker.chunkSize
+                    )
+
+                    // Получаем размерность вектора (берем из первого embedding)
+                    val vectorDimension = embeddings.firstOrNull()?.second?.size ?: 0
+
+                    // Формируем детальное сообщение о результате
+                    val resultMessage = buildString {
+                        appendLine("✅ Embeddings успешно созданы!")
+                        appendLine()
+                        appendLine("📊 Статистика:")
+                        appendLine("• Исходный файл: ${file.name}")
+                        appendLine("• Размер файла: ${originalText.length} символов")
+                        appendLine("• Создано чанков: ${embeddings.size}")
+                        appendLine("• Размерность векторов: $vectorDimension")
+                        appendLine("• Время обработки: %.1f сек".format(durationSeconds))
+                        appendLine()
+                        appendLine("💾 Результат сохранен:")
+                        appendLine("$outputPath")
+                        appendLine()
+                        appendLine("📝 Preview первого чанка:")
+
+                        // Показываем первый чанк и небольшую часть вектора
+                        if (embeddings.isNotEmpty()) {
+                            val firstChunk = embeddings.first()
+                            val chunkPreview = if (firstChunk.first.length > 150) {
+                                firstChunk.first.take(150) + "..."
+                            } else {
+                                firstChunk.first
+                            }
+                            appendLine("\"$chunkPreview\"")
+                            appendLine()
+                            appendLine("🔢 Вектор (первые 10 значений):")
+                            val vectorPreview = firstChunk.second.take(10).joinToString(", ") { "%.4f".format(it) }
+                            appendLine("[$vectorPreview, ...]")
+                        }
+                    }
+
+                    // Проверяем, что сообщение не превышает лимит Telegram (4096 символов)
+                    val finalMessage = if (resultMessage.length > 4000) {
+                        resultMessage.take(3997) + "..."
+                    } else {
+                        resultMessage
+                    }
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = finalMessage
+                    )
+
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "❌ Ошибка при генерации embeddings:\n${e.message}\n\n" +
+                               "💡 Убедитесь, что Ollama запущена:\n" +
+                               "ollama pull nomic-embed-text"
+                    )
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -358,8 +321,7 @@ class TelegramBotService(
                         userMessage = userMessage,
                         systemRole = defaultSystemRole,
                         temperature = temperature,
-                        model = gigaChatModel,
-                        enableMcp = true  // MCP активен по умолчанию
+                        model = gigaChatModel
                     )
 
                     // Формируем ответ с информацией о токенах

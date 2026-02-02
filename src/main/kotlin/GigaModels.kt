@@ -131,3 +131,35 @@ data class GigaChatFunctionCall(
     val name: String,
     val arguments: JsonElement // JSON объект или строка с аргументами
 )
+
+// === Models for Embeddings API ===
+
+/**
+ * Запрос для генерации embeddings
+ */
+@Serializable
+data class GigaChatEmbeddingRequest(
+    val model: String = "Embeddings", // или "EmbeddingsGigaR"
+    val input: List<String>
+)
+
+/**
+ * Отдельный embedding в ответе
+ */
+@Serializable
+data class GigaChatEmbedding(
+    val `object`: String, // "embedding"
+    val embedding: List<Float>,
+    val index: Int,
+    val usage: Usage? = null
+)
+
+/**
+ * Ответ от Embeddings API
+ */
+@Serializable
+data class GigaChatEmbeddingResponse(
+    val `object`: String, // "list"
+    val data: List<GigaChatEmbedding>,
+    val model: String
+)
