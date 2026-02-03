@@ -1,6 +1,7 @@
 package ru.dikoresearch.domain
 
 import GigaChatMessage
+import Usage
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 
@@ -12,6 +13,41 @@ class ChatOrchestrator(
     private val gigaClient: GigaChatClient,
     private val historyManager: ChatHistoryManager
 ) {
+    /**
+     * Обрабатывает сообщение без сохранения в историю (для RAG-тестирования)
+     *
+     * @param systemRole системный промпт
+     * @param userMessage текст сообщения пользователя
+     * @param temperature температура модели (0.0 - 1.0)
+     * @param model название модели GigaChat
+     * @return пара из текста ответа и статистики использования токенов
+     */
+    suspend fun processMessageWithoutHistory(
+        systemRole: String,
+        userMessage: String,
+        temperature: Float,
+        model: String = "GigaChat"
+    ): Pair<String, Usage> {
+        val tempHistory = mutableListOf(
+            GigaChatMessage(role = "system", content = systemRole),
+            GigaChatMessage(role = "user", content = userMessage)
+        )
+
+        val response = try {
+            gigaClient.chatCompletion(
+                model = model,
+                messages = tempHistory,
+                temperature = temperature
+            )
+        } catch (e: Exception) {
+            println("GigaChat error in processMessageWithoutHistory: ${e}")
+            throw ChatException("Ошибка при обращении к GigaChat LLM", e)
+        }
+
+        val answer = response.choices.firstOrNull()?.message?.content ?: "Пустой ответ"
+        return answer to response.usage
+    }
+
     /**
      * Обрабатывает сообщение пользователя и возвращает ответ
      *

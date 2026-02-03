@@ -163,6 +163,7 @@ fun main() {
             embeddingService = embeddingService,
             embeddingsManager = embeddingsManager,
             textChunker = textChunker,
+            ollamaClient = ollamaClient,
             applicationScope = applicationScope,
             defaultSystemRole = AssistantRole,
             defaultTemperature = 0.87F,
