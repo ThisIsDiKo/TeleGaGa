@@ -91,6 +91,8 @@ class TelegramBotService(
                     appendLine("🧠 RAG команды:")
                     appendLine("/createEmbeddings - создать embeddings из rag_docs/readme.md")
                     appendLine("/testRag <вопрос> - сравнить ответы с RAG и без RAG")
+                    appendLine("/compareRag <вопрос> - сравнить 3 подхода (без RAG, RAG, RAG+фильтр)")
+                    appendLine("/setThreshold <0.0-1.0> - настроить порог релевантности")
                     appendLine()
                     appendLine("💡 Для работы embeddings нужна запущенная Ollama:")
                     appendLine("ollama pull nomic-embed-text")
@@ -347,6 +349,254 @@ class TelegramBotService(
                         "💡 Убедитесь, что:\n" +
                         "1. Создали embeddings командой /createEmbeddings\n" +
                         "2. Ollama запущена и доступна"
+                    )
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        command("setThreshold") {
+            val chatId = message.chat.id
+            val thresholdStr = args.joinToString(" ")
+
+            if (thresholdStr.isBlank()) {
+                applicationScope.launch {
+                    val settings = settingsManager.loadSettings(chatId)
+                    bot.sendMessage(
+                        ChatId.fromId(chatId),
+                        """
+📊 Текущий порог релевантности: ${settings.ragRelevanceThreshold}
+
+Использование: /setThreshold <значение>
+Диапазон: 0.0 - 1.0
+
+Рекомендации:
+• 0.3-0.4 (низкий) - больше результатов, может быть шум
+• 0.5-0.6 (средний) - сбалансированный подход
+• 0.7-0.8 (высокий) - только высокорелевантные чанки
+
+Пример: /setThreshold 0.6
+                        """.trimIndent()
+                    )
+                }
+                return@command
+            }
+
+            val newThreshold = try {
+                thresholdStr.toFloat()
+            } catch (e: Exception) {
+                bot.sendMessage(
+                    ChatId.fromId(chatId),
+                    "❌ Ошибка: порог должен быть числом от 0.0 до 1.0\n\n" +
+                    "Пример: /setThreshold 0.6"
+                )
+                return@command
+            }
+
+            if (newThreshold < 0.0f || newThreshold > 1.0f) {
+                bot.sendMessage(
+                    ChatId.fromId(chatId),
+                    "❌ Ошибка: порог должен быть в диапазоне 0.0 - 1.0\n\n" +
+                    "Вы ввели: $newThreshold"
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                val settings = settingsManager.loadSettings(chatId)
+                settingsManager.saveSettings(chatId, settings.copy(
+                    ragRelevanceThreshold = newThreshold
+                ))
+
+                bot.sendMessage(
+                    ChatId.fromId(chatId),
+                    """
+✅ Порог релевантности обновлен: $newThreshold
+
+Интерпретация:
+${when {
+                        newThreshold < 0.4f -> "• Низкий порог - будет больше результатов"
+                        newThreshold < 0.7f -> "• Средний порог - сбалансированный подход"
+                        else -> "• Высокий порог - только самые релевантные чанки"
+                    }}
+
+Протестируйте с помощью /compareRag <вопрос>
+                    """.trimIndent()
+                )
+                println("✅ Порог релевантности обновлен для чата $chatId: $newThreshold")
+            }
+        }
+
+        command("compareRag") {
+            val chatId = message.chat.id
+            val query = args.joinToString(" ")
+
+            if (query.isBlank()) {
+                bot.sendMessage(
+                    ChatId.fromId(chatId),
+                    "Использование: /compareRag <ваш вопрос>\n\n" +
+                    "Сравнит 3 подхода:\n" +
+                    "1. БЕЗ RAG\n" +
+                    "2. С RAG (топ-5 без фильтра)\n" +
+                    "3. С RAG + фильтр релевантности\n\n" +
+                    "Пример: /compareRag Какие MCP серверы используются?"
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                try {
+                    // Получаем порог из настроек
+                    val settings = settingsManager.loadSettings(chatId)
+                    val threshold = settings.ragRelevanceThreshold
+
+                    bot.sendMessage(ChatId.fromId(chatId),
+                        "🔍 Начинаю сравнение трех подходов RAG (порог: ${threshold})..."
+                    )
+
+                    val ragService = ru.dikoresearch.domain.RagService(embeddingService)
+                    val systemRole = "Ты - полезный ассистент. Отвечай кратко и по существу."
+
+                    // === ПОДХОД 1: БЕЗ RAG ===
+                    bot.sendMessage(ChatId.fromId(chatId), "1/3 Генерация ответа БЕЗ RAG...")
+                    val startTimeNoRag = System.currentTimeMillis()
+                    val messagesNoRag = listOf(
+                        GigaChatMessage(role = "system", content = systemRole),
+                        GigaChatMessage(role = "user", content = query)
+                    )
+                    val responseNoRag = ollamaClient.chatCompletion(messagesNoRag)
+                    val timeNoRag = System.currentTimeMillis() - startTimeNoRag
+                    val answerNoRag = responseNoRag.message.content
+
+                    // === ПОДХОД 2: С RAG (топ-5, без фильтра) ===
+                    bot.sendMessage(ChatId.fromId(chatId), "2/3 Генерация ответа С RAG (без фильтра)...")
+                    val startTimeRagNoFilter = System.currentTimeMillis()
+                    val topChunksNoFilter = ragService.findRelevantChunks(query, "readme", 5)
+                    val contextNoFilter = ragService.formatContext(topChunksNoFilter)
+                    val ragPromptNoFilter = """
+Используя следующую информацию из документации, ответь на вопрос.
+Если информации недостаточно для ответа, так и скажи.
+
+$contextNoFilter
+
+Вопрос: $query
+                    """.trimIndent()
+
+                    val messagesRagNoFilter = listOf(
+                        GigaChatMessage(role = "system", content = systemRole),
+                        GigaChatMessage(role = "user", content = ragPromptNoFilter)
+                    )
+                    val responseRagNoFilter = ollamaClient.chatCompletion(messagesRagNoFilter)
+                    val timeRagNoFilter = System.currentTimeMillis() - startTimeRagNoFilter
+                    val answerRagNoFilter = responseRagNoFilter.message.content
+
+                    // === ПОДХОД 3: С RAG + ФИЛЬТР ===
+                    bot.sendMessage(ChatId.fromId(chatId), "3/3 Генерация ответа С RAG + фильтр (≥${threshold})...")
+                    val startTimeRagFiltered = System.currentTimeMillis()
+                    val searchResult = ragService.findRelevantChunksWithFilter(
+                        query, "readme", 5, threshold
+                    )
+
+                    val answerRagFiltered = if (searchResult.filteredCount > 0) {
+                        val contextFiltered = ragService.formatContext(searchResult.chunks)
+                        val ragPromptFiltered = """
+Используя следующую информацию из документации, ответь на вопрос.
+Если информации недостаточно для ответа, так и скажи.
+
+$contextFiltered
+
+Вопрос: $query
+                        """.trimIndent()
+
+                        val messagesRagFiltered = listOf(
+                            GigaChatMessage(role = "system", content = systemRole),
+                            GigaChatMessage(role = "user", content = ragPromptFiltered)
+                        )
+                        val responseRagFiltered = ollamaClient.chatCompletion(messagesRagFiltered)
+                        responseRagFiltered.message.content
+                    } else {
+                        "⚠️ Не найдено релевантных чанков (все < ${threshold}). Отвечаю без RAG:\n\n$answerNoRag"
+                    }
+                    val timeRagFiltered = System.currentTimeMillis() - startTimeRagFiltered
+
+                    // === ФОРМАТИРУЕМ РЕЗУЛЬТАТ ===
+                    val resultMessage = buildString {
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine("📊 СРАВНЕНИЕ ТРЕХ ПОДХОДОВ RAG")
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine()
+                        appendLine("🔍 Вопрос: $query")
+                        appendLine()
+
+                        // 1. БЕЗ RAG
+                        appendLine("━━━ 1️⃣ БЕЗ RAG ━━━")
+                        appendLine(answerNoRag.take(600))
+                        appendLine()
+                        appendLine("⏱️ Время: ${timeNoRag}ms")
+                        appendLine()
+
+                        // 2. RAG БЕЗ ФИЛЬТРА
+                        appendLine("━━━ 2️⃣ RAG (топ-5, без фильтра) ━━━")
+                        appendLine(answerRagNoFilter.take(600))
+                        appendLine()
+                        appendLine("📊 Чанки:")
+                        topChunksNoFilter.forEachIndexed { i, (_, rel, idx) ->
+                            appendLine("   ${i+1}. Чанк #$idx: %.4f (%.0f%%)".format(rel, rel * 100))
+                        }
+                        appendLine("⏱️ Время: ${timeRagNoFilter}ms")
+                        appendLine()
+
+                        // 3. RAG С ФИЛЬТРОМ
+                        appendLine("━━━ 3️⃣ RAG + ФИЛЬТР (≥${threshold}) ━━━")
+                        appendLine(answerRagFiltered.take(600))
+                        appendLine()
+                        appendLine("📊 Чанки:")
+                        appendLine("   Найдено кандидатов: ${searchResult.originalCount}")
+                        appendLine("   Прошли фильтр: ${searchResult.filteredCount}")
+                        if (searchResult.filteredCount > 0) {
+                            appendLine("   Средняя релевантность: %.4f".format(searchResult.avgRelevance))
+                            searchResult.chunks.forEachIndexed { i, (_, rel, idx) ->
+                                appendLine("   ${i+1}. Чанк #$idx: %.4f (%.0f%%)".format(rel, rel * 100))
+                            }
+                        }
+                        appendLine("⏱️ Время: ${timeRagFiltered}ms")
+                        appendLine()
+
+                        // ВЫВОДЫ
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine("💡 АВТОМАТИЧЕСКИЙ АНАЛИЗ:")
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine()
+
+                        when {
+                            searchResult.filteredCount == 0 -> {
+                                appendLine("❌ Фильтр отсек все чанки - релевантность низкая")
+                                appendLine("   Рекомендация: уменьшить порог или вопрос вне документации")
+                            }
+                            searchResult.filteredCount < topChunksNoFilter.size -> {
+                                appendLine("✅ Фильтр отсек ${topChunksNoFilter.size - searchResult.filteredCount} нерелевантных чанков")
+                                appendLine("   Ответ 3 должен быть точнее ответа 2")
+                            }
+                            else -> {
+                                appendLine("✅ Все чанки прошли фильтр - высокая релевантность")
+                                appendLine("   Ответы 2 и 3 должны быть схожи")
+                            }
+                        }
+
+                        appendLine()
+                        appendLine("Используйте /setThreshold для изменения порога")
+                    }
+
+                    // Отправляем результат (проверяем лимит Telegram)
+                    sendMessageSafely(chatId, if (resultMessage.length > 3800) {
+                        resultMessage.take(3797) + "..."
+                    } else {
+                        resultMessage
+                    })
+
+                } catch (e: Exception) {
+                    sendMessageSafely(chatId,
+                        "❌ Ошибка при сравнении RAG:\n${e.message}"
                     )
                     e.printStackTrace()
                 }

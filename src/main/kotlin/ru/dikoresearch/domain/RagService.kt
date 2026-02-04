@@ -10,6 +10,18 @@ import kotlin.math.sqrt
  * Сервис для Retrieval-Augmented Generation (RAG)
  * Выполняет векторный поиск релевантных чанков по запросу пользователя
  */
+/**
+ * Результат RAG поиска с метаданными
+ */
+data class RagSearchResult(
+    val chunks: List<Triple<String, Float, Int>>,  // (текст, релевантность, индекс)
+    val originalCount: Int,                         // Кол-во до фильтрации
+    val filteredCount: Int,                         // Кол-во после фильтрации
+    val avgRelevance: Float,                        // Средняя релевантность
+    val minRelevance: Float,                        // Минимальная релевантность
+    val maxRelevance: Float                         // Максимальная релевантность
+)
+
 class RagService(
     private val embeddingService: EmbeddingService
 ) {
@@ -72,6 +84,54 @@ class RagService(
         }
 
         return topResults
+    }
+
+    /**
+     * Находит релевантные чанки с фильтрацией по порогу
+     *
+     * @param question вопрос пользователя
+     * @param fileName имя файла (без расширения)
+     * @param topK максимальное количество кандидатов
+     * @param relevanceThreshold порог косинусного сходства (0.0-1.0)
+     * @return результат поиска с метаданными
+     */
+    suspend fun findRelevantChunksWithFilter(
+        question: String,
+        fileName: String = "readme",
+        topK: Int = 5,
+        relevanceThreshold: Float = 0.5f
+    ): RagSearchResult {
+        // 1. Получаем топ-K кандидатов (как раньше)
+        val topCandidates = findRelevantChunks(question, fileName, topK)
+
+        // 2. Фильтруем по порогу
+        val filteredChunks = topCandidates.filter { (_, relevance, _) ->
+            relevance >= relevanceThreshold
+        }
+
+        // 3. Собираем метаданные
+        val avgRelevance = if (filteredChunks.isNotEmpty()) {
+            filteredChunks.map { it.second }.average().toFloat()
+        } else 0f
+
+        val minRelevance = filteredChunks.minOfOrNull { it.second } ?: 0f
+        val maxRelevance = filteredChunks.maxOfOrNull { it.second } ?: 0f
+
+        println("🔍 Результаты фильтрации:")
+        println("   До фильтрации: ${topCandidates.size} чанков")
+        println("   После фильтрации (≥${relevanceThreshold}): ${filteredChunks.size} чанков")
+        if (filteredChunks.isNotEmpty()) {
+            println("   Средняя релевантность: %.4f".format(avgRelevance))
+        }
+
+        return RagSearchResult(
+            chunks = filteredChunks,
+            originalCount = topCandidates.size,
+            filteredCount = filteredChunks.size,
+            avgRelevance = avgRelevance,
+            minRelevance = minRelevance,
+            maxRelevance = maxRelevance
+        )
     }
 
     /**

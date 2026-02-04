@@ -17,7 +17,12 @@ data class ChatSettings(
     val temperature: Float = 0.87F,
     val reminderTime: String? = null,        // HH:mm формат
     val reminderEnabled: Boolean = false,
-    val lastReminderSent: String? = null     // ISO 8601 timestamp
+    val lastReminderSent: String? = null,    // ISO 8601 timestamp
+
+    // === RAG настройки ===
+    val ragRelevanceThreshold: Float = 0.5F, // Порог косинусного сходства (0.0-1.0)
+    val ragEnabled: Boolean = true,           // Включить/выключить RAG
+    val ragTopK: Int = 5                      // Количество кандидатов для reranking
 )
 
 /**

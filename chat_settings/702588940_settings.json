@@ -2,5 +2,6 @@
     "chatId": 702588940,
     "reminderTime": "22:33",
     "reminderEnabled": true,
-    "lastReminderSent": "2026-01-30T22:33:54.805376"
+    "lastReminderSent": "2026-01-30T22:33:54.805376",
+    "ragRelevanceThreshold": 0.75
 }
