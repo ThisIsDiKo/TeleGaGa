@@ -32,56 +32,102 @@ import java.io.File
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
 
-// Системные промпты
-val JsonRole = "Ты — сервис, который отвечает ТОЛЬКО валидным JSON-объектом без пояснений и форматирования Markdown.\n" +
-        "Всегда используй ровно такой формат:\n" +
+// System prompts
+val JsonRole = "You are a service that responds ONLY with valid JSON objects without explanations or Markdown formatting.\n" +
+        "Always use exactly this format:\n" +
         "\n" +
         "{\n" +
-        "  \"datetime\": \"ISO 8601 строка с датой и временем запроса, например 2026-01-13T20:54:00+03:00\",\n" +
-        "  \"model\": \"строка с названием модели, к которой был сделан запрос, например GigaChat\",\n" +
-        "  \"question\": \"строка с исходным вопросом пользователя\",\n" +
-        "  \"answer\": \"строка с ответом на вопрос\"\n" +
+        "  \"datetime\": \"ISO 8601 string with request date and time, e.g. 2026-01-13T20:54:00+03:00\",\n" +
+        "  \"model\": \"string with the model name that was requested, e.g. GigaChat\",\n" +
+        "  \"question\": \"string with the original user question\",\n" +
+        "  \"answer\": \"string with the answer to the question\"\n" +
         "}\n" +
         "\n" +
-        "Требования:\n" +
-        "- Не добавляй никакого текста вне JSON.\n" +
-        "- Всегда заполняй все поля.\n" +
-        "- В поле dateime не должно быть лишних слов, только представление даты и времени\n" +
-        "- Поле \"question\" копируй дословно из сообщения пользователя.\n" +
-        "- Поле \"datetime\" указывай в часовом поясе пользователя (если известен)."
+        "Requirements:\n" +
+        "- Do not add any text outside JSON.\n" +
+        "- Always fill all fields.\n" +
+        "- The datetime field should contain only date and time representation, no extra words\n" +
+        "- Copy the \"question\" field verbatim from the user message.\n" +
+        "- Specify \"datetime\" in the user's timezone (if known)."
 
-val AssistantRole = "Ты — эксперт \n" +
+val AssistantRole = "You are an expert.\n" +
         "\n" +
-        "1. Если вопрос неясен, сначала задай несколько коротких уточняющих вопроса (без предположений).\n" +
-        "2. Нужна максимальная конкретика\n" +
-        "3. После получения ответов дай структурированный совет или ТЗ\n" +
-        "4. Будь конкретным, используй примеры. Отвечай только по теме.\n" +
-        "5. Я хочу, чтобы ты задавал уточняющие вопросы последовательно, а не списком в 1 сообщение."
+        "1. If the question is unclear, first ask a few short clarifying questions (without assumptions).\n" +
+        "2. Maximum specificity is needed\n" +
+        "3. After receiving answers, give structured advice or specification\n" +
+        "4. Be specific, use examples. Answer only on topic.\n" +
+        "5. I want you to ask clarifying questions sequentially, not as a list in 1 message."
 
-val SingleRole = "Ты эксперт в области построения систем на основе семейства микроконтроллеров ESP32\n"
+val SingleRole = "You are an expert in building systems based on the ESP32 microcontroller family\n"
 
 val McpEnabledRole = """
-Docker помощник. Вызывай функции молча.
+Docker assistant. Call functions silently.
 
-Для "запусти caddy":
-- Функция: run_container
+For "start caddy":
+- Function: run_container
 - image: "caddy:latest"
 - name: "caddy"
 - ports: {"80": 80, "443": 443}
 - detach: true
 
-Для "запусти nginx":
-- Функция: run_container
+For "start nginx":
+- Function: run_container
 - image: "nginx:latest"
 - name: "nginx"
 - ports: {"80": 80}
 - detach: true
 
-НЕ используй command, environment, volumes.
-НЕ используй create_container или recreate_container.
-Только run_container!
+DO NOT use command, environment, volumes.
+DO NOT use create_container or recreate_container.
+Only run_container!
 
-После запуска: ✅ Запущен
+After start: ✅ Started
+""".trimIndent()
+
+val RagWithCitationsRole = """
+You are an AI assistant that answers questions ONLY based on the provided documentation fragments.
+Answer in English language only.
+
+MANDATORY RULES:
+
+1. USE ONLY PROVIDED FRAGMENTS
+   - If the answer is in a fragment - use it
+   - DO NOT ignore fragments
+
+2. EVERY FACT MUST HAVE A CITATION
+   - Citation format: [quoted text from source]
+   - Place the exact quoted text in square brackets after each fact
+   - Quote must be taken directly from the fragment
+
+3. FORBIDDEN:
+   - Answer without citations
+   - Invent facts
+   - Write "information not found" if it IS in the fragments
+
+CORRECT ANSWER EXAMPLES:
+
+Example 1:
+Question: "What is the weather tool?"
+Fragment: "get_weather - Get current weather for any city via wttr.in"
+Answer: "The weather tool gets current weather for any city [get_weather - Get current weather for any city via wttr.in]."
+
+Example 2:
+Question: "How many MCP servers are used?"
+Fragment: "TeleGaGa supports function calling through 5 MCP servers using two protocols"
+Answer: "The project uses 5 MCP servers with two protocols [TeleGaGa supports function calling through 5 MCP servers using two protocols]."
+
+Example 3:
+Question: "What models are used?"
+Fragment: "AI models: GigaChat, Ollama (llama3.2:3b, nomic-embed-text)"
+Answer: "The system uses GigaChat and Ollama models [AI models: GigaChat, Ollama (llama3.2:3b, nomic-embed-text)]."
+
+ALGORITHM:
+1. Read all provided fragments carefully
+2. Find relevant information
+3. Formulate clear answer in English
+4. Add citation in square brackets with EXACT text from fragment
+
+IMPORTANT: Always include citations in square brackets!
 """.trimIndent()
 
 fun main() {
@@ -127,7 +173,10 @@ fun main() {
         // 6. Инициализация RAG сервисов
         println("6. Инициализация RAG сервисов...")
         val markdownPreprocessor = MarkdownPreprocessor()
-        val textChunker = TextChunker(chunkSize = 200, overlap = 50)
+        // Оптимизированные параметры для точного подбора фрагментов с цитатами
+        // chunkSize: 300 символов = более полные фрагменты для корректного цитирования
+        // overlap: 50 символов = ~17% (сохраняет контекст на границах)
+        val textChunker = TextChunker(chunkSize = 300, overlap = 50)
         val embeddingService = EmbeddingService(
             gigaChatClient = null, // GigaChat требует пакеты
             ollamaClient = ollamaClient, // Используем Ollama (бесплатно)
@@ -217,11 +266,11 @@ private fun createHttpClient(): HttpClient {
         }
         install(Logging)
 
-        // Увеличенные таймауты для работы с внешними API (например, wttr.in)
+        // Увеличенные таймауты для работы с внешними API и RAG (qwen3 может быть медленным)
         install(HttpTimeout) {
-            requestTimeoutMillis = 60000  // 60 секунд на весь запрос
-            connectTimeoutMillis = 10000  // 10 секунд на установку соединения
-            socketTimeoutMillis = 60000   // 60 секунд на чтение/запись
+            requestTimeoutMillis = 180000  // 3 минуты на весь запрос
+            connectTimeoutMillis = 10000   // 10 секунд на установку соединения
+            socketTimeoutMillis = 180000   // 3 минуты на чтение/запись
         }
 
         // Из-за проблем с сертификатами минцифры, пришлось отключить их проверку

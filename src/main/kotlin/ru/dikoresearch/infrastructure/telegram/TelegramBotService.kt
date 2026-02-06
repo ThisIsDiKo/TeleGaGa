@@ -92,6 +92,7 @@ class TelegramBotService(
                     appendLine("/createEmbeddings - создать embeddings из rag_docs/readme.md")
                     appendLine("/testRag <вопрос> - сравнить ответы с RAG и без RAG")
                     appendLine("/compareRag <вопрос> - сравнить 3 подхода (без RAG, RAG, RAG+фильтр)")
+                    appendLine("/testRagCitations <вопрос> - тестирование RAG с цитированием (llama3.2:3b)")
                     appendLine("/setThreshold <0.0-1.0> - настроить порог релевантности")
                     appendLine()
                     appendLine("💡 Для работы embeddings нужна запущенная Ollama:")
@@ -229,11 +230,11 @@ class TelegramBotService(
                     val ragService = ru.dikoresearch.domain.RagService(embeddingService)
                     val topChunks = ragService.findRelevantChunks(query, "readme", 5)
 
-                    // 2. Системный промпт для RAG
-                    val systemRole = "Ты - полезный ассистент. Отвечай кратко и по существу."
+                    // 2. System prompt for RAG
+                    val systemRole = "You are a helpful assistant. Answer concisely and to the point in English."
 
-                    // 3. Генерируем ответ БЕЗ RAG (используем Ollama)
-                    bot.sendMessage(ChatId.fromId(chatId), "🤖 Генерация ответа БЕЗ RAG (Ollama llama3.2:1b)...")
+                    // 3. Generate answer WITHOUT RAG (using Ollama)
+                    bot.sendMessage(ChatId.fromId(chatId), "🤖 Generating answer WITHOUT RAG (Ollama llama3.2:3b)...")
                     val messagesWithoutRag = listOf(
                         GigaChatMessage(role = "system", content = systemRole),
                         GigaChatMessage(role = "user", content = query)
@@ -241,16 +242,17 @@ class TelegramBotService(
                     val responseWithoutRag = ollamaClient.chatCompletion(messagesWithoutRag)
                     val answerWithoutRag = responseWithoutRag.message.content
 
-                    // 4. Генерируем ответ С RAG (используем Ollama)
-                    bot.sendMessage(ChatId.fromId(chatId), "🧠 Генерация ответа С RAG (Ollama llama3.2:1b + топ-5 чанков)...")
+                    // 4. Generate answer WITH RAG (using Ollama)
+                    bot.sendMessage(ChatId.fromId(chatId), "🧠 Generating answer WITH RAG (Ollama llama3.2:3b + top-5 chunks)...")
                     val ragContext = ragService.formatContext(topChunks)
                     val ragPrompt = """
-                        Используя следующую информацию из документации, ответь на вопрос.
-                        Если информации недостаточно для ответа, так и скажи.
+                        Using the following information from documentation, answer the question.
+                        If information is not sufficient for the answer, say so.
+                        Answer in English.
 
                         $ragContext
 
-                        Вопрос: $query
+                        Question: $query
                     """.trimIndent()
 
                     val messagesWithRag = listOf(
@@ -455,10 +457,10 @@ ${when {
                     )
 
                     val ragService = ru.dikoresearch.domain.RagService(embeddingService)
-                    val systemRole = "Ты - полезный ассистент. Отвечай кратко и по существу."
+                    val systemRole = "You are a helpful assistant. Answer concisely and to the point in English."
 
-                    // === ПОДХОД 1: БЕЗ RAG ===
-                    bot.sendMessage(ChatId.fromId(chatId), "1/3 Генерация ответа БЕЗ RAG...")
+                    // === APPROACH 1: WITHOUT RAG ===
+                    bot.sendMessage(ChatId.fromId(chatId), "1/3 Generating answer WITHOUT RAG...")
                     val startTimeNoRag = System.currentTimeMillis()
                     val messagesNoRag = listOf(
                         GigaChatMessage(role = "system", content = systemRole),
@@ -468,18 +470,19 @@ ${when {
                     val timeNoRag = System.currentTimeMillis() - startTimeNoRag
                     val answerNoRag = responseNoRag.message.content
 
-                    // === ПОДХОД 2: С RAG (топ-5, без фильтра) ===
-                    bot.sendMessage(ChatId.fromId(chatId), "2/3 Генерация ответа С RAG (без фильтра)...")
+                    // === APPROACH 2: WITH RAG (top-5, no filter) ===
+                    bot.sendMessage(ChatId.fromId(chatId), "2/3 Generating answer WITH RAG (no filter)...")
                     val startTimeRagNoFilter = System.currentTimeMillis()
                     val topChunksNoFilter = ragService.findRelevantChunks(query, "readme", 5)
                     val contextNoFilter = ragService.formatContext(topChunksNoFilter)
                     val ragPromptNoFilter = """
-Используя следующую информацию из документации, ответь на вопрос.
-Если информации недостаточно для ответа, так и скажи.
+Using the following information from documentation, answer the question.
+If information is not sufficient for the answer, say so.
+Answer in English.
 
 $contextNoFilter
 
-Вопрос: $query
+Question: $query
                     """.trimIndent()
 
                     val messagesRagNoFilter = listOf(
@@ -490,8 +493,8 @@ $contextNoFilter
                     val timeRagNoFilter = System.currentTimeMillis() - startTimeRagNoFilter
                     val answerRagNoFilter = responseRagNoFilter.message.content
 
-                    // === ПОДХОД 3: С RAG + ФИЛЬТР ===
-                    bot.sendMessage(ChatId.fromId(chatId), "3/3 Генерация ответа С RAG + фильтр (≥${threshold})...")
+                    // === APPROACH 3: WITH RAG + FILTER ===
+                    bot.sendMessage(ChatId.fromId(chatId), "3/3 Generating answer WITH RAG + filter (≥${threshold})...")
                     val startTimeRagFiltered = System.currentTimeMillis()
                     val searchResult = ragService.findRelevantChunksWithFilter(
                         query, "readme", 5, threshold
@@ -500,12 +503,13 @@ $contextNoFilter
                     val answerRagFiltered = if (searchResult.filteredCount > 0) {
                         val contextFiltered = ragService.formatContext(searchResult.chunks)
                         val ragPromptFiltered = """
-Используя следующую информацию из документации, ответь на вопрос.
-Если информации недостаточно для ответа, так и скажи.
+Using the following information from documentation, answer the question.
+If information is not sufficient for the answer, say so.
+Answer in English.
 
 $contextFiltered
 
-Вопрос: $query
+Question: $query
                         """.trimIndent()
 
                         val messagesRagFiltered = listOf(
@@ -603,6 +607,136 @@ $contextFiltered
             }
         }
 
+        command("testRagCitations") {
+            val chatId = message.chat.id
+            val query = args.joinToString(" ")
+
+            if (query.isBlank()) {
+                bot.sendMessage(
+                    ChatId.fromId(chatId),
+                    "Использование: /testRagCitations <ваш вопрос>\n\n" +
+                    "Команда для тестирования RAG с обязательным цитированием источников.\n" +
+                    "Использует модель qwen3:4b для генерации ответов.\n\n" +
+                    "Пример: /testRagCitations Какие MCP серверы используются в проекте?"
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                try {
+                    bot.sendMessage(ChatId.fromId(chatId),
+                        "🔍 Тестирование RAG с цитированием источников...\n" +
+                        "Модель: qwen3:4b"
+                    )
+
+                    val ragService = ru.dikoresearch.domain.RagService(embeddingService)
+
+                    // Получаем порог из настроек
+                    val settings = settingsManager.loadSettings(chatId)
+                    val threshold = settings.ragRelevanceThreshold
+
+                    bot.sendMessage(ChatId.fromId(chatId),
+                        "📚 Поиск релевантных чанков (порог: $threshold)..."
+                    )
+
+                    // Находим релевантные чанки с фильтром
+                    val searchResult = ragService.findRelevantChunksWithFilter(
+                        query, "readme", 5, threshold
+                    )
+
+                    if (searchResult.filteredCount == 0) {
+                        bot.sendMessage(ChatId.fromId(chatId),
+                            "⚠️ Не найдено релевантных чанков (порог: $threshold)\n" +
+                            "Попробуйте снизить порог командой /setThreshold"
+                        )
+                        return@launch
+                    }
+
+                    bot.sendMessage(ChatId.fromId(chatId),
+                        "✅ Найдено ${searchResult.filteredCount} релевантных чанков\n" +
+                        "Средняя релевантность: %.2f%%".format(searchResult.avgRelevance * 100)
+                    )
+
+                    // Format context with citations
+                    val contextWithCitations = ragService.formatContextWithCitations(
+                        searchResult.chunks,
+                        "readme.md"
+                    )
+
+                    // System prompt for citations
+                    val systemRole = ru.dikoresearch.RagWithCitationsRole
+
+                    val ragPrompt = """
+                        $contextWithCitations
+
+                        Question: $query
+                    """.trimIndent()
+
+                    // DEBUG: Print prompt to console
+                    println("=== RAG PROMPT DEBUG ===")
+                    println("System role length: ${systemRole.length}")
+                    println("RAG prompt length: ${ragPrompt.length}")
+                    println("Context preview (first 500 chars):")
+                    println(contextWithCitations.take(500))
+                    println("======================")
+
+                    bot.sendMessage(ChatId.fromId(chatId),
+                        "🤖 Generating answer with citations (llama3.2:3b)..."
+                    )
+
+                    val messages = listOf(
+                        GigaChatMessage(role = "system", content = systemRole),
+                        GigaChatMessage(role = "user", content = ragPrompt)
+                    )
+
+                    val response = ollamaClient.chatCompletion(messages)
+                    val answer = response.message.content
+
+                    // Analyze presence of citations in answer
+                    val citationPattern = """\[.*?\]""".toRegex()
+                    val citations = citationPattern.findAll(answer).count()
+
+                    val resultMessage = buildString {
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine("📖 RAG WITH SOURCE CITATIONS")
+                        appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                        appendLine()
+                        appendLine("🔍 Question: $query")
+                        appendLine()
+                        appendLine("━━━ ANSWER ━━━")
+                        appendLine(answer)
+                        appendLine()
+                        appendLine("━━━ STATISTICS ━━━")
+                        appendLine("📊 Chunks used: ${searchResult.filteredCount}")
+                        appendLine("📎 Citations found: $citations")
+                        appendLine("✅ Relevance threshold: $threshold")
+                        appendLine("📈 Average relevance: %.2f%%".format(searchResult.avgRelevance * 100))
+                        appendLine()
+
+                        if (citations == 0) {
+                            appendLine("⚠️ WARNING: Answer doesn't contain source references!")
+                            appendLine("   Model may have ignored instructions.")
+                        } else {
+                            appendLine("✅ Answer contains $citations source references in square brackets")
+                        }
+                    }
+
+                    // Отправляем результат
+                    sendMessageSafely(chatId, if (resultMessage.length > 3800) {
+                        resultMessage.take(3797) + "..."
+                    } else {
+                        resultMessage
+                    })
+
+                } catch (e: Exception) {
+                    sendMessageSafely(chatId,
+                        "❌ Ошибка при тестировании RAG с цитированием:\n${e.message}"
+                    )
+                    e.printStackTrace()
+                }
+            }
+        }
+
         command("createEmbeddings") {
             val chatId = message.chat.id
 
@@ -628,33 +762,40 @@ $contextFiltered
                     val originalText = file.readText()
                     val startTime = System.currentTimeMillis()
 
-                    // Генерируем embeddings с предобработкой Markdown
-                    // (удаление код-блоков, разбиение на абзацы)
-                    val embeddings = embeddingService.generateEmbeddingsForMarkdown(originalText)
+                    // Генерируем embeddings с предобработкой Markdown и метаданными
+                    // (удаление код-блоков, разбиение на абзацы с сохранением номеров строк)
+                    val embeddingsWithMetadata = embeddingService.generateEmbeddingsWithMetadata(
+                        originalText,
+                        "readme.md"
+                    )
 
                     val endTime = System.currentTimeMillis()
                     val durationSeconds = (endTime - startTime) / 1000.0
 
-                    // Сохраняем в JSON
-                    val outputPath = embeddingsManager.saveEmbeddings(
+                    // Сохраняем в JSON с метаданными
+                    val outputPath = embeddingsManager.saveEmbeddingsWithMetadata(
                         fileName = "readme",
-                        embeddings = embeddings,
+                        embeddings = embeddingsWithMetadata,
                         chunkSize = textChunker.chunkSize
                     )
 
                     // Получаем размерность вектора (берем из первого embedding)
-                    val vectorDimension = embeddings.firstOrNull()?.second?.size ?: 0
+                    val vectorDimension = embeddingsWithMetadata.firstOrNull()?.embedding?.size ?: 0
 
                     // Формируем детальное сообщение о результате
                     val resultMessage = buildString {
-                        appendLine("✅ Embeddings успешно созданы!")
+                        appendLine("✅ Embeddings с метаданными успешно созданы!")
                         appendLine()
                         appendLine("📊 Статистика:")
                         appendLine("• Исходный файл: ${file.name}")
                         appendLine("• Размер файла: ${originalText.length} символов")
-                        appendLine("• Создано чанков: ${embeddings.size}")
+                        appendLine("• Создано чанков: ${embeddingsWithMetadata.size}")
                         appendLine("• Размерность векторов: $vectorDimension")
                         appendLine("• Время обработки: %.1f сек".format(durationSeconds))
+                        appendLine()
+                        appendLine("⚙️ Параметры чанкинга:")
+                        appendLine("• Размер чанка: ${textChunker.chunkSize} символов")
+                        appendLine("• Перекрытие: ${textChunker.overlap} символов (${(textChunker.overlap.toFloat() / textChunker.chunkSize * 100).toInt()}%)")
                         appendLine()
                         appendLine("💾 Результат сохранен:")
                         appendLine("$outputPath")
@@ -662,17 +803,18 @@ $contextFiltered
                         appendLine("📝 Preview первого чанка:")
 
                         // Показываем первый чанк и небольшую часть вектора
-                        if (embeddings.isNotEmpty()) {
-                            val firstChunk = embeddings.first()
-                            val chunkPreview = if (firstChunk.first.length > 150) {
-                                firstChunk.first.take(150) + "..."
+                        if (embeddingsWithMetadata.isNotEmpty()) {
+                            val firstChunk = embeddingsWithMetadata.first()
+                            val chunkPreview = if (firstChunk.text.length > 150) {
+                                firstChunk.text.take(150) + "..."
                             } else {
-                                firstChunk.first
+                                firstChunk.text
                             }
+                            appendLine("📍 Чанк #1 (строки ${firstChunk.startLine}-${firstChunk.endLine}):")
                             appendLine("\"$chunkPreview\"")
                             appendLine()
                             appendLine("🔢 Вектор (первые 10 значений):")
-                            val vectorPreview = firstChunk.second.take(10).joinToString(", ") { "%.4f".format(it) }
+                            val vectorPreview = firstChunk.embedding.take(10).joinToString(", ") { "%.4f".format(it) }
                             appendLine("[$vectorPreview, ...]")
                         }
                     }

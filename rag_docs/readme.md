@@ -1,247 +1,247 @@
-# TeleGaGa - Полная документация проекта
+# TeleGaGa - Complete Project Documentation
 
-**Telegram бот на Kotlin с интеграцией GigaChat, Ollama, MCP и RAG**
-
----
-
-## Содержание
-
-1. [Обзор проекта](#обзор-проекта)
-2. [Архитектура](#архитектура)
-3. [Настройка и запуск](#настройка-и-запуск)
-4. [MCP интеграция](#mcp-интеграция)
-5. [RAG система](#rag-система)
-6. [Система напоминаний](#система-напоминаний)
-7. [Команды бота](#команды-бота)
-8. [Тестирование](#тестирование)
-9. [История разработки](#история-разработки)
+**Telegram bot on Kotlin with GigaChat, Ollama, MCP and RAG integration**
 
 ---
 
-# Обзор проекта
+## Table of Contents
 
-TeleGaGa - это Telegram бот написанный на Kotlin, который интегрируется с двумя LLM провайдерами:
-- **GigaChat** (Sberbank's LLM service) - основной AI бэкенд с поддержкой MCP tool calling
-- **Ollama** (локальный LLM) - для локального тестирования моделей
+1. [Project Overview](#project-overview)
+2. [Architecture](#architecture)
+3. [Setup and Launch](#setup-and-launch)
+4. [MCP Integration](#mcp-integration)
+5. [RAG System](#rag-system)
+6. [Reminder System](#reminder-system)
+7. [Bot Commands](#bot-commands)
+8. [Testing](#testing)
+9. [Development History](#development-history)
 
-Бот поддерживает:
-- Разговорную историю с автоматической суммаризацией (20+ сообщений)
-- Настраиваемые системные промпты и температуру
-- **Model Context Protocol (MCP)** для использования внешних инструментов
-- **RAG (Retrieval-Augmented Generation)** с векторным поиском и фильтрацией релевантности
-- Систему напоминаний с автоматической отправкой
+---
 
-## Технологический стек
+# Project Overview
 
-- **Язык**: Kotlin 2.2.10
+TeleGaGa is a Telegram bot written in Kotlin that integrates with two LLM providers:
+- **GigaChat** (Sberbank's LLM service) - primary AI backend with MCP tool calling support
+- **Ollama** (local LLM) - for local model testing
+
+The bot supports:
+- Conversation history with automatic summarization (20+ messages)
+- Configurable system prompts and temperature
+- **Model Context Protocol (MCP)** for using external tools
+- **RAG (Retrieval-Augmented Generation)** with vector search and relevance filtering
+- Reminder system with automatic delivery
+
+## Technology Stack
+
+- **Language**: Kotlin 2.2.10
 - **Build tool**: Gradle 8.14
-- **HTTP клиент**: Ktor 3.3.0
+- **HTTP client**: Ktor 3.3.0
 - **Telegram API**: kotlin-telegram-bot 6.1.0
 - **MCP**: HTTP (Node.js servers) + Stdio (Python servers)
-- **AI модели**: GigaChat, Ollama (llama3.2:1b, nomic-embed-text)
-- **Embeddings**: Ollama nomic-embed-text (768-мерные векторы)
-- **Хранилище**: JSON файлы (истории, настройки, embeddings)
+- **AI models**: GigaChat, Ollama (llama3.2:1b, nomic-embed-text)
+- **Embeddings**: Ollama nomic-embed-text (768-dimensional vectors)
+- **Storage**: JSON files (histories, settings, embeddings)
 
 ---
 
-# Архитектура
+# Architecture
 
-## Слои проекта
+## Project Layers
 
-TeleGaGa построен по принципам Clean Architecture с четким разделением на слои:
+TeleGaGa is built on Clean Architecture principles with clear layer separation:
 
 ```
 src/main/kotlin/
-├── GigaModels.kt                    # Модели данных GigaChat API
-├── OllamaModels.kt                  # Модели данных Ollama API
+├── GigaModels.kt                    # GigaChat API data models
+├── OllamaModels.kt                  # Ollama API data models
 └── ru/dikoresearch/
-    ├── Main.kt                      # Точка входа приложения
-    ├── domain/                      # Бизнес-логика (Domain Layer)
-    │   ├── ChatOrchestrator.kt      # Оркестратор обработки сообщений
-    │   ├── RagService.kt            # Векторный поиск RAG
-    │   ├── ReminderScheduler.kt     # Планировщик напоминаний
-    │   ├── ToolCallHandler.kt       # Обработчик MCP tool calls
-    │   ├── TextChunker.kt           # Разбиение текста на чанки
-    │   └── MarkdownPreprocessor.kt  # Предобработка Markdown
-    └── infrastructure/              # Инфраструктурный слой
+    ├── Main.kt                      # Application entry point
+    ├── domain/                      # Business logic (Domain Layer)
+    │   ├── ChatOrchestrator.kt      # Message processing orchestrator
+    │   ├── RagService.kt            # RAG vector search
+    │   ├── ReminderScheduler.kt     # Reminder scheduler
+    │   ├── ToolCallHandler.kt       # MCP tool calls handler
+    │   ├── TextChunker.kt           # Text chunking
+    │   └── MarkdownPreprocessor.kt  # Markdown preprocessing
+    └── infrastructure/              # Infrastructure layer
         ├── config/
-        │   └── ConfigService.kt     # Управление конфигурацией
+        │   └── ConfigService.kt     # Configuration management
         ├── http/
-        │   ├── GigaChatClient.kt    # HTTP клиент GigaChat API
-        │   └── OllamaClient.kt      # HTTP клиент Ollama API
+        │   ├── GigaChatClient.kt    # GigaChat API HTTP client
+        │   └── OllamaClient.kt      # Ollama API HTTP client
         ├── mcp/
-        │   ├── HttpMcpService.kt    # HTTP MCP клиент (Node.js)
-        │   └── StdioMcpService.kt   # Stdio MCP клиент (Python)
+        │   ├── HttpMcpService.kt    # HTTP MCP client (Node.js)
+        │   └── StdioMcpService.kt   # Stdio MCP client (Python)
         ├── embeddings/
-        │   └── EmbeddingService.kt  # Генерация embeddings
+        │   └── EmbeddingService.kt  # Embeddings generation
         ├── persistence/
-        │   ├── ChatHistoryManager.kt      # Сохранение истории чатов
-        │   ├── ChatSettingsManager.kt     # Управление настройками
-        │   └── EmbeddingsManager.kt       # Управление векторной БД
+        │   ├── ChatHistoryManager.kt      # Chat history storage
+        │   ├── ChatSettingsManager.kt     # Settings management
+        │   └── EmbeddingsManager.kt       # Vector DB management
         └── telegram/
-            └── TelegramBotService.kt # Telegram бот интерфейс
+            └── TelegramBotService.kt # Telegram bot interface
 ```
 
-## Ключевые компоненты
+## Key Components
 
 ### 1. Entry Point (Main.kt)
 
-**Ответственность:** Инициализация и сборка всех компонентов приложения
+**Responsibility:** Initialize and assemble all application components
 
-**Ключевые функции:**
-- Загрузка конфигурации через ConfigService
-- Создание HTTP клиента с отключенной SSL-проверкой (для GigaChat)
-- Инициализация всех сервисов в правильном порядке
-- Запуск Health Check сервера (порт 12222)
-- Graceful shutdown при завершении
+**Key functions:**
+- Load configuration via ConfigService
+- Create HTTP client with disabled SSL verification (for GigaChat)
+- Initialize all services in correct order
+- Start Health Check server (port 12222)
+- Graceful shutdown on termination
 
-**Системные промпты:**
-- `JsonRole` - для структурированных JSON ответов
-- `AssistantRole` - эксперт-консультант
-- `SingleRole` - эксперт по ESP32
-- `McpEnabledRole` - AI ассистент с MCP tool access (по умолчанию)
+**System prompts:**
+- `JsonRole` - for structured JSON responses
+- `AssistantRole` - expert consultant
+- `SingleRole` - ESP32 expert
+- `McpEnabledRole` - AI assistant with MCP tool access (default)
 
 ### 2. Domain Layer - ChatOrchestrator
 
-**Ответственность:** Чистая бизнес-логика обработки сообщений без зависимости от внешних frameworks
+**Responsibility:** Pure business logic for message processing without external framework dependencies
 
-**Ключевые методы:**
-- `processMessage()` - обрабатывает сообщение пользователя и возвращает ответ
-- `updateSystemRole()` - обновляет системный промпт для чата
-- `clearHistory()` - очищает историю чата
+**Key methods:**
+- `processMessage()` - processes user message and returns response
+- `updateSystemRole()` - updates system prompt for chat
+- `clearHistory()` - clears chat history
 
-**Особенности:**
-- Независим от Telegram API (принимает простые типы: Long, String)
-- Автоматическая суммаризация истории при превышении 20 сообщений
-- Обрезает ответы до 3800 символов (лимит Telegram)
-- Реализует tool calling loop (до 5 итераций)
-- Автоматическая инъекция даты/времени в системный промпт (для "сегодня", "завтра")
-- Возвращает структурированный результат (ChatResponse)
+**Features:**
+- Independent from Telegram API (accepts simple types: Long, String)
+- Automatic history summarization when exceeding 20 messages
+- Truncates responses to 3800 characters (Telegram limit)
+- Implements tool calling loop (up to 5 iterations)
+- Automatic date/time injection into system prompt (for "today", "tomorrow")
+- Returns structured result (ChatResponse)
 
 ### 3. AI Clients
 
 #### GigaChatClient
-- Token-based аутентификация с автоматическим обновлением
-- Thread-safe управление токеном через Mutex
-- Поддержка function calling для MCP инструментов
+- Token-based authentication with automatic refresh
+- Thread-safe token management via Mutex
+- Function calling support for MCP tools
 - OAuth token endpoint: `https://ngw.devices.sberbank.ru:9443/api/v2/oauth`
 - Chat completions endpoint: `{baseUrl}/api/v1/chat/completions`
 
 #### OllamaClient
-- Использует модель `llama3.2:1b` для генерации
+- Uses `llama3.2:1b` model for generation
 - Endpoint: `http://localhost:11434/api/chat`
-- Используется для локального тестирования и RAG
+- Used for local testing and RAG
 
 ### 4. MCP Integration
 
-#### HttpMcpService (Node.js серверы)
+#### HttpMcpService (Node.js servers)
 **Protocol:** Streamable HTTP (MCP 2024-11-05)
 
-**Управляет 3 серверами:**
-- **weather** (port 3001) - погода через wttr.in
-- **reminders** (port 3002) - система напоминаний
-- **chuck** (port 3003) - шутки про Чака Норриса
+**Manages 3 servers:**
+- **weather** (port 3001) - weather via wttr.in
+- **reminders** (port 3002) - reminder system
+- **chuck** (port 3003) - Chuck Norris jokes
 
-**Функции:**
-- Автоматический запуск Node.js серверов через ProcessBuilder
-- Создание HTTP сессий для каждого сервера (mcp-session-id header)
-- Агрегация инструментов от всех серверов в единый список
-- Health checks и graceful shutdown
-- Thread-safe с Mutex защитой
+**Functions:**
+- Automatic Node.js server launch via ProcessBuilder
+- HTTP session creation for each server (mcp-session-id header)
+- Tool aggregation from all servers into single list
+- Health checks and graceful shutdown
+- Thread-safe with Mutex protection
 
-#### StdioMcpService (Python серверы)
+#### StdioMcpService (Python servers)
 **Protocol:** JSON-RPC over stdin/stdout (MCP 2024-11-05)
 
-**Управляет Docker MCP сервером:**
-- **compose_create** - создание Docker Compose конфигурации
-- **compose_spec** - показать текущую конфигурацию
-- **compose_apply** - применить конфигурацию (запустить контейнеры)
-- **compose_down** - остановить и удалить контейнеры
-- **docker_ps** - показать запущенные контейнеры
-- **docker_images** - показать доступные образы
-- **docker_logs** - показать логи контейнера
+**Manages Docker MCP server:**
+- **compose_create** - create Docker Compose configuration
+- **compose_spec** - show current configuration
+- **compose_apply** - apply configuration (start containers)
+- **compose_down** - stop and remove containers
+- **docker_ps** - show running containers
+- **docker_images** - show available images
+- **docker_logs** - show container logs
 
-**Требования:**
-- Docker Desktop должен быть установлен и запущен
-- mcp-server-docker установлен через pipx
+**Requirements:**
+- Docker Desktop must be installed and running
+- mcp-server-docker installed via pipx
 - Python 3.12+
 
 #### ToolCallHandler
-**Ответственность:** Оркестратор tool calling
+**Responsibility:** Tool calling orchestrator
 
-- Поддержка обоих MCP протоколов (HTTP и Stdio)
-- Конвертация MCP tools в формат GigaChat function
-- Маршрутизация function calls к соответствующему MCP сервису
-- Выполнение function calls и возврат результатов как JSON
-- Обработка JSON аргументов и ошибок
+- Support for both MCP protocols (HTTP and Stdio)
+- Convert MCP tools to GigaChat function format (from both protocols)
+- Route function calls to appropriate MCP service
+- Execute function calls and return results as JSON
+- Handle JSON argument parsing and errors
 
 ### 5. RAG (Retrieval-Augmented Generation)
 
 #### RagService
-**Ответственность:** Векторный поиск и фильтрация релевантности
+**Responsibility:** Vector search and relevance filtering
 
-**Ключевые методы:**
-- `findRelevantChunks()` - векторный поиск топ-K чанков по косинусному сходству
-- `findRelevantChunksWithFilter()` - фильтрация по порогу релевантности (0.0-1.0)
-- `formatContext()` - форматирование чанков в LLM-friendly контекст
+**Key methods:**
+- `findRelevantChunks()` - vector search for top-K most relevant chunks using cosine similarity
+- `findRelevantChunksWithFilter()` - **NEW** Filter chunks by relevance threshold (0.0-1.0)
+- `formatContext()` - format chunks into LLM-friendly context
 
-**Особенности:**
-- Использует Ollama `nomic-embed-text` для embeddings (768-мерные векторы)
-- Хранилище: `embeddings_store/<filename>.embeddings.json`
-- Фильтрация по релевантности сокращает шум на 20-30%
-- Улучшает качество ответов
+**Features:**
+- Uses Ollama `nomic-embed-text` for embeddings (768-dimensional vectors)
+- Storage: `embeddings_store/<filename>.embeddings.json`
+- Relevance filtering reduces noise by 20-30%
+- Improves answer quality
 
 **RagSearchResult data class:**
-- chunks: отфильтрованные чанки (текст, релевантность, индекс)
-- originalCount: количество до фильтрации
-- filteredCount: количество после фильтрации
-- avgRelevance, minRelevance, maxRelevance: статистика
+- chunks: filtered chunks (text, relevance, index)
+- originalCount: count before filtering
+- filteredCount: count after filtering
+- avgRelevance, minRelevance, maxRelevance: statistics
 
 #### EmbeddingService
-- Взаимодействие с Ollama embedding API
-- `generateEmbeddings()` - генерация embeddings для текста
-- `generateEmbeddingsForMarkdown()` - предобработка и чанкинг Markdown
-- Использует TextChunker для интеллектуального разбиения
+- Communicates with Ollama embedding API
+- `generateEmbeddings()` - generate embeddings for text
+- `generateEmbeddingsForMarkdown()` - preprocess and chunk Markdown
+- Uses TextChunker for intelligent splitting
 
 #### ChatSettingsManager
-**Расширен для RAG (День 18):**
-- `ragRelevanceThreshold` (Float, default 0.5) - порог релевантности
-- `ragEnabled` (Boolean) - включение/отключение RAG
-- `ragTopK` (Int) - количество кандидатов для reranking
-- Thread-safe хранилище с Mutex per chatId
-- JSON-based персистентность в `chat_settings/<chatId>_settings.json`
+**Extended for RAG (Day 18):**
+- `ragRelevanceThreshold` (Float, default 0.5) - relevance threshold
+- `ragEnabled` (Boolean) - enable/disable RAG
+- `ragTopK` (Int) - number of candidates for reranking
+- Thread-safe storage with Mutex per chatId
+- JSON-based persistence in `chat_settings/<chatId>_settings.json`
 
 ### 6. TelegramBotService
 
-**Ответственность:** Изоляция всей Telegram-специфичной логики
+**Responsibility:** Isolate all Telegram-specific logic
 
-**Команды:**
-- Общие: `/start`, `/changeRole`, `/changeT`, `/clearChat`
+**Commands:**
+- General: `/start`, `/changeRole`, `/changeT`, `/clearChat`
 - MCP: `/enableMcp`, `/listTools`
 - RAG: `/createEmbeddings`, `/testRag`, `/compareRag`, `/setThreshold`
-- Напоминания: `/setReminderTime`, `/disableReminders`
+- Reminders: `/setReminderTime`, `/disableReminders`
 
-**Особенности:**
-- Использует `applicationScope.launch {}` для suspend функций
-- Хранит температуру для каждого чата отдельно
-- Делегирует обработку сообщений в ChatOrchestrator
-- Безопасная отправка сообщений с обработкой ошибок
+**Features:**
+- Uses `applicationScope.launch {}` for suspend functions
+- Stores temperature per chat separately
+- Delegates message processing to ChatOrchestrator
+- Safe message sending with error handling
 
 ### 7. ReminderScheduler
 
-**Ответственность:** Автоматическая отправка напоминаний
+**Responsibility:** Automatic reminder delivery
 
-**Функции:**
-- Проверка каждую минуту для чатов с reminderTime
-- Отправка ежедневных напоминаний в настроенное время
-- Включает погоду для Санкт-Петербурга (get_weather MCP tool)
-- Включает переведенную шутку про Чака Норриса
-- Использует ChatOrchestrator с MCP для получения данных
-- Отслеживает lastReminderSent для предотвращения дубликатов
+**Functions:**
+- Check every minute for chats with reminderTime set
+- Send daily reminders at configured time
+- Includes weather for St. Petersburg (get_weather MCP tool)
+- Includes translated Chuck Norris joke
+- Uses ChatOrchestrator with MCP to fetch data
+- Tracks lastReminderSent to prevent duplicates
 
-## Потоки данных
+## Data Flows
 
-### Обработка сообщения пользователя
+### User Message Processing
 
 ```
 User Message (Telegram)
@@ -252,24 +252,24 @@ ChatOrchestrator.processMessage()
     ↓
 ChatHistoryManager.loadHistory()
     ↓
-[Если MCP включен]
+[If MCP enabled]
     ToolCallHandler.getAvailableFunctions()
     ↓
     GigaChatClient.chatCompletion(functions=5)
     ↓
-    [Цикл tool calling до 5 итераций]
-        Если finish_reason="function_call":
+    [Tool calling loop up to 5 iterations]
+        If finish_reason="function_call":
             ToolCallHandler.executeFunctionCall()
             ↓
             McpService.callTool()
             ↓
-            Добавить результат в историю
+            Add result to history
             ↓
-            Повторить запрос к GigaChat
+            Repeat request to GigaChat
     ↓
 ChatHistoryManager.saveHistory()
     ↓
-[Если history.size > 20]
+[If history.size > 20]
     ChatOrchestrator.summarizeHistory()
     ↓
 ChatResponse → TelegramBotService
@@ -277,57 +277,57 @@ ChatResponse → TelegramBotService
 bot.sendMessage() → User
 ```
 
-### RAG поиск
+### RAG Search
 
 ```
-User: /testRag <вопрос>
+User: /testRag <question>
     ↓
 TelegramBotService
     ↓
 RagService.findRelevantChunksWithFilter()
     ↓
-1. Генерация embedding для вопроса (Ollama nomic-embed)
-2. Загрузка всех embeddings из embeddings_store/readme.embeddings.json
-3. Вычисление косинусного сходства для каждого чанка
-4. Сортировка по убыванию релевантности
-5. Фильтрация по порогу (≥ ragRelevanceThreshold)
-6. Возврат топ-K отфильтрованных чанков
+1. Generate embedding for question (Ollama nomic-embed)
+2. Load all embeddings from embeddings_store/readme.embeddings.json
+3. Calculate cosine similarity for each chunk
+4. Sort by descending relevance
+5. Filter by threshold (≥ ragRelevanceThreshold)
+6. Return top-K filtered chunks
     ↓
 RagService.formatContext()
     ↓
-OllamaClient.chatCompletion() - два параллельных запроса:
-    • БЕЗ RAG: только вопрос
-    • С RAG: вопрос + топ-K релевантных чанков
+OllamaClient.chatCompletion() - two parallel requests:
+    • WITHOUT RAG: question only
+    • WITH RAG: question + top-K relevant chunks
     ↓
-Форматирование результата с сравнением
+Format result with comparison
     ↓
 bot.sendMessage() → User
 ```
 
 ---
 
-# Настройка и запуск
+# Setup and Launch
 
-## Системные требования
+## System Requirements
 
 - **Java 17+** (OpenJDK 17.0.1)
 - **Kotlin 2.2.10**
 - **Gradle 8.14**
-- **Node.js** (для MCP HTTP серверов)
-- **Python 3.12+** (для MCP Stdio сервера)
-- **Ollama** (для локального LLM и embeddings)
-- **Docker Desktop** (опционально, для Docker MCP tools)
+- **Node.js** (for MCP HTTP servers)
+- **Python 3.12+** (for MCP Stdio server)
+- **Ollama** (for local LLM and embeddings)
+- **Docker Desktop** (optional, for Docker MCP tools)
 
-## Установка Ollama
+## Ollama Installation
 
 ### macOS
 ```bash
 brew install ollama
 ollama serve
 
-# В другом терминале:
-ollama pull llama3.2:1b       # для генерации ответов
-ollama pull nomic-embed-text  # для embeddings
+# In another terminal:
+ollama pull llama3.2:1b       # for answer generation
+ollama pull nomic-embed-text  # for embeddings
 ```
 
 ### Linux
@@ -335,52 +335,52 @@ ollama pull nomic-embed-text  # для embeddings
 curl -fsSL https://ollama.com/install.sh | sh
 ollama serve
 
-# В другом терминале:
+# In another terminal:
 ollama pull llama3.2:1b
 ollama pull nomic-embed-text
 ```
 
-## Настройка конфигурации
+## Configuration Setup
 
-### 1. Создание config.properties
+### 1. Create config.properties
 
 ```bash
 cp config.properties.template config.properties
 ```
 
-### 2. Заполнение параметров
+### 2. Fill in parameters
 
-Откройте `config.properties` и заполните:
+Open `config.properties` and fill in:
 
 ```properties
-# Токен Telegram бота (получите у @BotFather)
+# Telegram bot token (get from @BotFather)
 telegram.token=YOUR_TELEGRAM_BOT_TOKEN
 
-# Ключ авторизации GigaChat в формате Base64
+# GigaChat authorization key in Base64 format
 gigachat.authKey=YOUR_GIGACHAT_AUTH_KEY
 
-# Базовый URL GigaChat API
+# GigaChat API base URL
 gigachat.baseUrl=https://gigachat.devices.sberbank.ru
 
-# Модель GigaChat
+# GigaChat model
 gigachat.model=GigaChat
 ```
 
-### 3. Получение токенов
+### 3. Obtain tokens
 
 #### Telegram Bot Token
-1. Откройте Telegram и найдите @BotFather
-2. Отправьте команду `/newbot`
-3. Следуйте инструкциям для создания нового бота
-4. Скопируйте полученный токен в параметр `telegram.token`
+1. Open Telegram and find @BotFather
+2. Send command `/newbot`
+3. Follow instructions to create new bot
+4. Copy received token to `telegram.token` parameter
 
 #### GigaChat Auth Key
-1. Зарегистрируйтесь на платформе GigaChat (https://developers.sber.ru/)
-2. Создайте новый проект
-3. Получите ключ авторизации (Authorization Key) в формате Base64
-4. Скопируйте ключ в параметр `gigachat.authKey`
+1. Register on GigaChat platform (https://developers.sber.ru/)
+2. Create new project
+3. Get authorization key (Authorization Key) in Base64 format
+4. Copy key to `gigachat.authKey` parameter
 
-## Установка MCP серверов
+## MCP Server Installation
 
 ### HTTP MCP Servers (Node.js)
 
@@ -398,337 +398,337 @@ cd ../mcp-chuck-server
 npm install
 ```
 
-Серверы автоматически запускаются ботом на портах 3001-3003.
+Servers are automatically started by bot on ports 3001-3003.
 
 ### Stdio MCP Server (Python - Docker)
 
 ```bash
-# Установить pipx (если еще не установлен)
+# Install pipx (if not already installed)
 brew install pipx  # macOS
-# или
+# or
 sudo apt install pipx  # Linux
 
-# Установить mcp-server-docker
+# Install mcp-server-docker
 pipx install mcp-server-docker
 pipx ensurepath
 
-# Проверить установку
+# Verify installation
 which mcp-server-docker
 
-# Запустить Docker Desktop
+# Start Docker Desktop
 open -a Docker  # macOS
 ```
 
-## Сборка и запуск
+## Build and Run
 
-### Сборка проекта
+### Build project
 
 ```bash
 export JAVA_HOME=/Users/dmitriikonovalov/Library/Java/JavaVirtualMachines/openjdk-17.0.1/Contents/Home
 ./gradlew build
 ```
 
-**Ожидаемый результат:**
+**Expected result:**
 ```
 BUILD SUCCESSFUL in 9s
 5 actionable tasks: 5 executed
 ```
 
-### Запуск бота
+### Run bot
 
 ```bash
 export JAVA_HOME=/Users/dmitriikonovalov/Library/Java/JavaVirtualMachines/openjdk-17.0.1/Contents/Home
 ./gradlew run
 ```
 
-### Проверка запуска
+### Verify startup
 
-**В логах должны появиться:**
+**Logs should show:**
 ```
-=== Запуск TeleGaGa бота ===
-Конфигурация загружена успешно
-HTTP клиент создан
-GigaChat клиент создан
-🧹 Очистка портов от старых процессов...
+=== Starting TeleGaGa bot ===
+Configuration loaded successfully
+HTTP client created
+GigaChat client created
+🧹 Cleaning ports from old processes...
 ✅ weather: 1 tools on port 3001
 ✅ reminders: 3 tools on port 3002
 ✅ chuck: 1 tools on port 3003
-✅ Все MCP серверы запущены и подключены
-✅ MCP сервис инициализирован
-🕐 ReminderScheduler запущен
-Health Check сервер запущен на порту 12222
-Telegram бот запущен и ожидает сообщений
+✅ All MCP servers started and connected
+✅ MCP service initialized
+🕐 ReminderScheduler started
+Health Check server started on port 12222
+Telegram bot started and waiting for messages
 ```
 
 ### Health Check
 
-Проверить работу бота:
+Check bot status:
 ```bash
 curl http://localhost:12222/
-# Ответ: "Bot OK"
+# Response: "Bot OK"
 ```
 
-## Безопасность
+## Security
 
-**ВАЖНО:** Файл `config.properties` содержит конфиденциальные данные и добавлен в `.gitignore`.
+**IMPORTANT:** File `config.properties` contains confidential data and is added to `.gitignore`.
 
-- **НИКОГДА** не коммитьте `config.properties` в git
-- Храните токены в безопасном месте
-- Не делитесь токенами с третьими лицами
-- При компрометации токенов немедленно их обновите
+- **NEVER** commit `config.properties` to git
+- Store tokens in secure location
+- Don't share tokens with third parties
+- Immediately update tokens if compromised
 
 ---
 
-# MCP интеграция
+# MCP Integration
 
-## Что такое MCP
+## What is MCP
 
-Model Context Protocol (MCP) - это протокол для расширения возможностей языковых моделей через внешние инструменты (tools). TeleGaGa поддерживает function calling через **5 MCP серверов** по двум протоколам.
+Model Context Protocol (MCP) is a protocol for extending language model capabilities through external tools. TeleGaGa supports function calling through **5 MCP servers** using two protocols.
 
-## Доступные MCP инструменты
+## Available MCP Tools
 
 ### HTTP MCP Servers (Node.js)
 
 #### 1. get_weather (mcp-weather-server, port 3001)
-**Описание:** Получение текущей погоды для любого города через wttr.in
+**Description:** Get current weather for any city via wttr.in
 
-**Параметры:**
-- `city` (string) - название города
-- `lang` (string, optional) - язык ответа ("ru" или "en")
+**Parameters:**
+- `city` (string) - city name
+- `lang` (string, optional) - response language ("ru" or "en")
 
-**Пример использования:**
+**Usage example:**
 ```
-User: Какая погода в Санкт-Петербурге?
-Bot: [вызывает get_weather с city="Санкт-Петербург", lang="ru"]
+User: What's the weather in St. Petersburg?
+Bot: [calls get_weather with city="St. Petersburg", lang="en"]
 ```
 
 #### 2. create_reminder (mcp-reminders-server, port 3002)
-**Описание:** Создание нового напоминания
+**Description:** Create new reminder
 
-**Параметры:**
-- `chatId` (string) - ID чата
-- `dueDate` (string) - дата в формате YYYY-MM-DD
-- `text` (string) - текст напоминания
+**Parameters:**
+- `chatId` (string) - chat ID
+- `dueDate` (string) - date in YYYY-MM-DD format
+- `text` (string) - reminder text
 
-**Пример:**
+**Example:**
 ```
-User: Напомни мне завтра купить молоко
-Bot: [вызывает create_reminder с dueDate="2026-02-05", text="купить молоко"]
+User: Remind me tomorrow to buy milk
+Bot: [calls create_reminder with dueDate="2026-02-05", text="buy milk"]
 ```
 
 #### 3. get_reminders (mcp-reminders-server, port 3002)
-**Описание:** Получение списка напоминаний за период
+**Description:** Get list of reminders for period
 
-**Параметры:**
-- `chatId` (string) - ID чата
-- `startDate` (string) - начальная дата (YYYY-MM-DD)
-- `endDate` (string) - конечная дата (YYYY-MM-DD)
+**Parameters:**
+- `chatId` (string) - chat ID
+- `startDate` (string) - start date (YYYY-MM-DD)
+- `endDate` (string) - end date (YYYY-MM-DD)
 
-**Пример:**
+**Example:**
 ```
-User: Что у меня на сегодня?
-Bot: [вызывает get_reminders с startDate=сегодня, endDate=сегодня]
+User: What do I have today?
+Bot: [calls get_reminders with startDate=today, endDate=today]
 ```
 
 #### 4. delete_reminder (mcp-reminders-server, port 3002)
-**Описание:** Удаление/завершение напоминания
+**Description:** Delete/complete reminder
 
-**Параметры:**
-- `chatId` (string) - ID чата
-- `reminderId` (string) - ID напоминания
+**Parameters:**
+- `chatId` (string) - chat ID
+- `reminderId` (string) - reminder ID
 
-**Пример:**
+**Example:**
 ```
-User: Удали напоминание про молоко
-Bot: [вызывает get_reminders → находит ID → вызывает delete_reminder]
+User: Delete the milk reminder
+Bot: [calls get_reminders → finds ID → calls delete_reminder]
 ```
 
 #### 5. get_chuck_norris_joke (mcp-chuck-server, port 3003)
-**Описание:** Получение случайной шутки про Чака Норриса (на английском)
+**Description:** Get random Chuck Norris joke (in English)
 
-**Параметры:** нет
+**Parameters:** none
 
-**Пример:**
+**Example:**
 ```
-User: Расскажи шутку про Чака Норриса
-Bot: [вызывает get_chuck_norris_joke → получает английскую шутку → переводит на русский]
+User: Tell me a Chuck Norris joke
+Bot: [calls get_chuck_norris_joke → gets English joke → translates to user's language]
 ```
 
-**Важно:** LLM автоматически переводит шутки с английского на русский согласно системному промпту.
+**Important:** LLM automatically translates jokes from English according to system prompt.
 
 ### Stdio MCP Server (Python)
 
 #### Docker MCP (mcp-server-docker)
-Предоставляет 7 инструментов для управления Docker:
+Provides 7 tools for Docker management:
 
-1. **compose_create** - создание Docker Compose конфигурации
-2. **compose_spec** - показать текущую конфигурацию
-3. **compose_apply** - применить конфигурацию (запустить)
-4. **compose_down** - остановить и удалить контейнеры
-5. **docker_ps** - показать запущенные контейнеры
-6. **docker_images** - показать доступные образы
-7. **docker_logs** - показать логи контейнера
+1. **compose_create** - create Docker Compose configuration
+2. **compose_spec** - show current configuration
+3. **compose_apply** - apply configuration (start)
+4. **compose_down** - stop and remove containers
+5. **docker_ps** - show running containers
+6. **docker_images** - show available images
+7. **docker_logs** - show container logs
 
-**Пример:**
+**Example:**
 ```
-User: Запусти Caddy сервер
-Bot: [вызывает compose_create → compose_apply]
+User: Start Caddy server
+Bot: [calls compose_create → compose_apply]
 
-User: Покажи запущенные контейнеры
-Bot: [вызывает docker_ps]
+User: Show running containers
+Bot: [calls docker_ps]
 
-User: Останови Caddy
-Bot: [вызывает compose_down]
+User: Stop Caddy
+Bot: [calls compose_down]
 ```
 
-## Как работает function calling
+## How Function Calling Works
 
-### Алгоритм tool calling
+### Tool Calling Algorithm
 
 ```
-1. User отправляет сообщение
+1. User sends message
    ↓
-2. ChatOrchestrator получает список доступных MCP функций
+2. ChatOrchestrator gets list of available MCP functions
    ↓
-3. GigaChat получает запрос с functions=[...] и functionCall="auto"
+3. GigaChat receives request with functions=[...] and functionCall="auto"
    ↓
-4. Если GigaChat решает вызвать функцию:
+4. If GigaChat decides to call function:
    - finish_reason = "function_call"
-   - GigaChatFunctionCall содержит: name, arguments
+   - GigaChatFunctionCall contains: name, arguments
    ↓
-5. ToolCallHandler выполняет функцию через MCP
+5. ToolCallHandler executes function via MCP
    ↓
-6. Результат добавляется в историю с role="function"
+6. Result added to history with role="function"
    ↓
-7. Повторный запрос к GigaChat с обновленной историей
+7. Repeat request to GigaChat with updated history
    ↓
-8. [Повторять шаги 4-7 до max 5 итераций]
+8. [Repeat steps 4-7 up to max 5 iterations]
    ↓
-9. Финальный ответ пользователю
+9. Final answer to user
 ```
 
-### Пример цикла tool calling
+### Tool Calling Loop Example
 
-**User:** "Напомни мне завтра проверить погоду в Москве и расскажи шутку"
+**User:** "Remind me tomorrow to check weather in Moscow and tell a joke"
 
-**Итерация 1:**
-- GigaChat вызывает `create_reminder`
-- Результат добавлен в историю
+**Iteration 1:**
+- GigaChat calls `create_reminder`
+- Result added to history
 
-**Итерация 2:**
-- GigaChat вызывает `get_weather`
-- Результат добавлен в историю
+**Iteration 2:**
+- GigaChat calls `get_weather`
+- Result added to history
 
-**Итерация 3:**
-- GigaChat вызывает `get_chuck_norris_joke`
-- Результат добавлен в историю
+**Iteration 3:**
+- GigaChat calls `get_chuck_norris_joke`
+- Result added to history
 
-**Итерация 4:**
-- GigaChat формирует финальный ответ
+**Iteration 4:**
+- GigaChat forms final answer
 - finish_reason = "stop"
-- Отправка пользователю
+- Send to user
 
-## Безопасность MCP
+## MCP Security
 
-### Изоляция данных
+### Data Isolation
 
-**Проблема:** Как предотвратить доступ к напоминаниям других пользователей?
+**Problem:** How to prevent access to other users' reminders?
 
-**Решение:** Автоматическая подстановка chatId в контекст
+**Solution:** Automatic chatId substitution into context
 
-В `ChatOrchestrator.kt`:
+In `ChatOrchestrator.kt`:
 ```kotlin
 val contextMessage = GigaChatMessage(
     role = "system",
     content = """
-ВАЖНО: Твой chatId = $chatId.
-ВСЕГДА используй этот chatId в функциях create_reminder, get_reminders, delete_reminder.
-НИКОГДА не используй другие chatId.
+IMPORTANT: Your chatId = $chatId.
+ALWAYS use this chatId in create_reminder, get_reminders, delete_reminder functions.
+NEVER use other chatId.
     """.trimIndent()
 )
-history.add(1, contextMessage)  // Вставляем после системного промпта
+history.add(1, contextMessage)  // Insert after system prompt
 ```
 
-После обработки контекстное сообщение удаляется из истории.
+After processing, context message is removed from history.
 
-### Валидация на стороне MCP
+### MCP-side Validation
 
-Каждый MCP сервер проверяет параметры:
-- Обязательные поля должны присутствовать
-- Формат даты должен быть YYYY-MM-DD
-- chatId должен быть валидным
+Each MCP server validates parameters:
+- Required fields must be present
+- Date format must be YYYY-MM-DD
+- chatId must be valid
 
-## Troubleshooting MCP
+## MCP Troubleshooting
 
-### Проблема: MCP инструменты не работают
+### Problem: MCP tools don't work
 
-**Диагностика:**
+**Diagnostics:**
 ```bash
-# Проверить доступность серверов
+# Check server availability
 curl http://localhost:3001/healthz  # weather
 curl http://localhost:3002/healthz  # reminders
 curl http://localhost:3003/healthz  # chuck
 
-# Проверить процессы
+# Check processes
 lsof -ti:3001 && echo "weather OK" || echo "weather DEAD"
 lsof -ti:3002 && echo "reminders OK" || echo "reminders DEAD"
 lsof -ti:3003 && echo "chuck OK" || echo "chuck DEAD"
 
-# Проверить через бота
-/listTools  # должно показать 5 инструментов
+# Check via bot
+/listTools  # should show 5 tools
 ```
 
-**Решение:**
-1. Проверить что Node.js установлен
-2. Проверить что npm dependencies установлены в каждой папке mcp-*-server
-3. Проверить логи при старте бота:
-   - Должно быть "✅ weather: X tools on port 3001"
-   - Должно быть "✅ reminders: X tools on port 3002"
-   - Должно быть "✅ chuck: X tools on port 3003"
-4. Перезапустить бота (порты автоматически очищаются)
+**Solution:**
+1. Check that Node.js is installed
+2. Check that npm dependencies are installed in each mcp-*-server folder
+3. Check logs on bot startup:
+   - Should see "✅ weather: X tools on port 3001"
+   - Should see "✅ reminders: X tools on port 3002"
+   - Should see "✅ chuck: X tools on port 3003"
+4. Restart bot (ports automatically cleaned)
 
-### Проблема: Docker MCP не работает
+### Problem: Docker MCP doesn't work
 
-**Диагностика:**
+**Diagnostics:**
 ```bash
-# Проверить Docker
-docker ps  # должен работать без ошибок
+# Check Docker
+docker ps  # should work without errors
 
-# Проверить установку mcp-server-docker
+# Check mcp-server-docker installation
 which mcp-server-docker
 pipx list | grep mcp-server-docker
 ```
 
-**Решение:**
-1. Запустить Docker Desktop
-2. Установить mcp-server-docker: `pipx install mcp-server-docker`
-3. Проверить Python версию: `python --version` (должна быть 3.12+)
+**Solution:**
+1. Start Docker Desktop
+2. Install mcp-server-docker: `pipx install mcp-server-docker`
+3. Check Python version: `python --version` (should be 3.12+)
 
-### Проблема: Модель не вызывает инструменты
+### Problem: Model doesn't call tools
 
-**Причины:**
-- MCP режим не активирован для чата
-- Неподходящий системный промпт
-- Слишком низкая температура
+**Reasons:**
+- MCP mode not activated for chat
+- Inappropriate system prompt
+- Too low temperature
 
-**Решение:**
-1. Отправить `/enableMcp` (хотя MCP активен по умолчанию для новых чатов)
-2. Проверить что в логах есть `functions=5` в запросе к GigaChat
-3. Попробовать более явные запросы: "Получи данные о погоде..." вместо "Расскажи про погоду..."
+**Solution:**
+1. Send `/enableMcp` (though MCP active by default for new chats)
+2. Check logs for `functions=5` in GigaChat request
+3. Try more explicit requests: "Get weather data..." instead of "Tell about weather..."
 
 ---
 
-# RAG система
+# RAG System
 
-## Что такое RAG
+## What is RAG
 
-Retrieval-Augmented Generation (RAG) - технология, которая улучшает ответы языковой модели путем предоставления релевантного контекста из документации.
+Retrieval-Augmented Generation (RAG) is a technology that improves language model answers by providing relevant context from documentation.
 
-**Ключевая особенность TeleGaGa:** Полностью локальная реализация на базе Ollama - не требует внешних платных API.
+**Key feature of TeleGaGa:** Fully local implementation based on Ollama - doesn't require external paid APIs.
 
-## Архитектура RAG
+## RAG Architecture
 
-### Компоненты RAG системы
+### RAG System Components
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -739,405 +739,405 @@ Retrieval-Augmented Generation (RAG) - технология, которая ул
                        ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   RagService                            │
-│  1. Генерация embedding для вопроса (Ollama)           │
-│  2. Поиск топ-K чанков по косинусному сходству         │
-│  3. Фильтрация по порогу релевантности                 │
-│  4. Форматирование контекста                            │
+│  1. Generate embedding for question (Ollama)           │
+│  2. Search top-K chunks by cosine similarity           │
+│  3. Filter by relevance threshold                      │
+│  4. Format context                                     │
 └──────────────────────┬──────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────┐
 │                  Ollama Client                          │
-│  Запросы к llama3.2:1b с контекстом из RAG             │
+│  Requests to llama3.2:1b with RAG context              │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Хранилище данных
+### Data Storage
 
-| Компонент | Файл | Назначение |
-|-----------|------|------------|
-| **Исходные документы** | `rag_docs/readme.md` | Markdown документация для индексации |
-| **Векторная БД** | `embeddings_store/<filename>.embeddings.json` | Хранилище embeddings (1.3MB, 63+ чанка) |
-| **Настройки** | `chat_settings/<chatId>_settings.json` | Порог релевантности и др. |
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Source documents** | `rag_docs/readme.md` | Markdown documentation for indexing |
+| **Vector DB** | `embeddings_store/<filename>.embeddings.json` | Embeddings storage (1.3MB, 63+ chunks) |
+| **Settings** | `chat_settings/<chatId>_settings.json` | Relevance threshold etc. |
 
-## RAG команды
+## RAG Commands
 
 ### /createEmbeddings
 
-Создает векторную базу данных из документации.
+Creates vector database from documentation.
 
-**Процесс:**
-1. Читает файл `rag_docs/readme.md`
-2. Предобрабатывает Markdown (удаляет код-блоки)
-3. Разбивает на чанки по 200 символов с перекрытием 50
-4. Генерирует embeddings через Ollama (модель `nomic-embed-text`)
-5. Сохраняет в `embeddings_store/readme.embeddings.json`
+**Process:**
+1. Reads file `rag_docs/readme.md`
+2. Preprocesses Markdown (removes code blocks)
+3. Splits into chunks of 200 characters with 50 overlap
+4. Generates embeddings via Ollama (model `nomic-embed-text`)
+5. Saves to `embeddings_store/readme.embeddings.json`
 
-**Пример вывода:**
+**Example output:**
 ```
-✅ Embeddings успешно созданы!
+✅ Embeddings created successfully!
 
-📊 Статистика:
-• Исходный файл: readme.md
-• Размер файла: 12847 символов
-• Создано чанков: 63
-• Размерность векторов: 768
-• Время обработки: 45.3 сек
+📊 Statistics:
+• Source file: readme.md
+• File size: 12847 characters
+• Created chunks: 63
+• Vector dimension: 768
+• Processing time: 45.3 sec
 
-💾 Результат сохранен:
+💾 Result saved:
 embeddings_store/readme.embeddings.json
 
-📝 Preview первого чанка:
+📝 Preview of first chunk:
 "# CLAUDE.md
 
 This file provides guidance to Claude Code..."
 ```
 
-**Требования:**
-- Ollama запущена и доступна
-- Модель `nomic-embed-text` установлена: `ollama pull nomic-embed-text`
+**Requirements:**
+- Ollama running and available
+- Model `nomic-embed-text` installed: `ollama pull nomic-embed-text`
 
 ---
 
-### /testRag <вопрос>
+### /testRag <question>
 
-Сравнивает ответы языковой модели с RAG и без RAG.
+Compares language model answers with RAG and without RAG.
 
-**Алгоритм:**
-1. **Поиск чанков**: Генерирует embedding для вопроса и находит топ-5 релевантных фрагментов
-2. **Ответ БЕЗ RAG**: Прямой запрос к Ollama (llama3.2:1b)
-3. **Ответ С RAG**: Запрос + топ-5 чанков в Ollama
-4. **Сравнение**: Показывает оба ответа, статистику релевантности и токенов
+**Algorithm:**
+1. **Search chunks**: Generates embedding for question and finds top-5 relevant fragments
+2. **Answer WITHOUT RAG**: Direct request to Ollama (llama3.2:1b)
+3. **Answer WITH RAG**: Request + top-5 chunks to Ollama
+4. **Comparison**: Shows both answers, relevance statistics and tokens
 
-**Формат вывода:**
+**Output format:**
 ```
 ━━━━━━━━━━━━━━━━━━━━
-🤖 ОТВЕТ БЕЗ RAG:
+🤖 ANSWER WITHOUT RAG:
 ━━━━━━━━━━━━━━━━━━━━
 
-[Ответ модели без доступа к документации]
+[Model answer without documentation access]
 
 ━━━━━━━━━━━━━━━━━━━━
-🧠 ОТВЕТ С RAG (топ-5 чанков):
+🧠 ANSWER WITH RAG (top-5 chunks):
 ━━━━━━━━━━━━━━━━━━━━
 
-[Ответ модели с контекстом из документации]
+[Model answer with documentation context]
 
 ━━━━━━━━━━━━━━━━━━━━
-📊 СТАТИСТИКА:
+📊 STATISTICS:
 ━━━━━━━━━━━━━━━━━━━━
 
-Найденные чанки:
-1. Чанк #12: 0.8543 (85%)
-2. Чанк #34: 0.7892 (79%)
-3. Чанк #7: 0.7234 (72%)
-4. Чанк #45: 0.6891 (69%)
-5. Чанк #23: 0.6543 (65%)
+Found chunks:
+1. Chunk #12: 0.8543 (85%)
+2. Chunk #34: 0.7892 (79%)
+3. Chunk #7: 0.7234 (72%)
+4. Chunk #45: 0.6891 (69%)
+5. Chunk #23: 0.6543 (65%)
 
-Использовано токенов (Ollama):
-• Без RAG: 245 токенов
-• С RAG: 672 токенов (+174% для контекста)
+Tokens used (Ollama):
+• Without RAG: 245 tokens
+• With RAG: 672 tokens (+174% for context)
 
 ━━━━━━━━━━━━━━━━━━━━
-💡 ВЫВОД:
+💡 CONCLUSION:
 ━━━━━━━━━━━━━━━━━━━━
 
-✅ RAG помог: найдены высокорелевантные чанки (78%)
-Ответ С RAG должен быть точнее и содержательнее.
+✅ RAG helped: found highly relevant chunks (78%)
+Answer WITH RAG should be more accurate and informative.
 ```
 
-**Критерии оценки:**
-- ✅ **RAG помог** (релевантность ≥70%) - найдены точные фрагменты
-- ⚠️ **RAG частично помог** (50-70%) - найдены связанные фрагменты
-- ❌ **RAG не помог** (<50%) - вопрос вне документации
+**Evaluation criteria:**
+- ✅ **RAG helped** (relevance ≥70%) - found exact fragments
+- ⚠️ **RAG partially helped** (50-70%) - found related fragments
+- ❌ **RAG didn't help** (<50%) - question outside documentation
 
 ---
 
-### /compareRag <вопрос> (НОВИНКА - День 18)
+### /compareRag <question> (NEW - Day 18)
 
-Сравнивает **3 подхода** к генерации ответов:
-1. **БЕЗ RAG** - прямой запрос без контекста
-2. **С RAG (топ-5, без фильтра)** - использует все 5 найденных чанков
-3. **С RAG + ФИЛЬТР** - использует только чанки выше порога релевантности
+Compares **3 approaches** to answer generation:
+1. **WITHOUT RAG** - direct request without context
+2. **WITH RAG (top-5, no filter)** - uses all 5 found chunks
+3. **WITH RAG + FILTER** - uses only chunks above relevance threshold
 
-**Формат вывода:**
+**Output format:**
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 СРАВНЕНИЕ ТРЕХ ПОДХОДОВ RAG
+📊 COMPARING THREE RAG APPROACHES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔍 Вопрос: Какие MCP серверы используются?
+🔍 Question: What MCP servers are used?
 
-━━━ 1️⃣ БЕЗ RAG ━━━
-[Ответ без контекста]
-⏱️ Время: 1234ms
+━━━ 1️⃣ WITHOUT RAG ━━━
+[Answer without context]
+⏱️ Time: 1234ms
 
-━━━ 2️⃣ RAG (топ-5, без фильтра) ━━━
-[Ответ с топ-5 чанками]
+━━━ 2️⃣ RAG (top-5, no filter) ━━━
+[Answer with top-5 chunks]
 
-📊 Чанки:
-   1. Чанк #23: 0.7500 (75%)
-   2. Чанк #45: 0.6800 (68%)
-   3. Чанк #12: 0.4200 (42%)
-   4. Чанк #89: 0.3500 (35%)
-   5. Чанк #67: 0.2800 (28%)
-⏱️ Время: 2345ms
+📊 Chunks:
+   1. Chunk #23: 0.7500 (75%)
+   2. Chunk #45: 0.6800 (68%)
+   3. Chunk #12: 0.4200 (42%)
+   4. Chunk #89: 0.3500 (35%)
+   5. Chunk #67: 0.2800 (28%)
+⏱️ Time: 2345ms
 
-━━━ 3️⃣ RAG + ФИЛЬТР (≥0.5) ━━━
-[Ответ с отфильтрованными чанками]
+━━━ 3️⃣ RAG + FILTER (≥0.5) ━━━
+[Answer with filtered chunks]
 
-📊 Чанки:
-   Найдено кандидатов: 5
-   Прошли фильтр: 2
-   Средняя релевантность: 0.7150
-   1. Чанк #23: 0.7500 (75%)
-   2. Чанк #45: 0.6800 (68%)
-⏱️ Время: 1789ms
+📊 Chunks:
+   Found candidates: 5
+   Passed filter: 2
+   Average relevance: 0.7150
+   1. Chunk #23: 0.7500 (75%)
+   2. Chunk #45: 0.6800 (68%)
+⏱️ Time: 1789ms
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 АВТОМАТИЧЕСКИЙ АНАЛИЗ:
+💡 AUTOMATIC ANALYSIS:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ Фильтр отсек 3 нерелевантных чанков
-   Ответ 3 должен быть точнее ответа 2
+✅ Filter removed 3 irrelevant chunks
+   Answer 3 should be more accurate than answer 2
 
-Используйте /setThreshold для изменения порога
+Use /setThreshold to change threshold
 ```
 
-**Автоматический анализ:**
-- Если filteredCount == 0: "❌ Фильтр отсек все чанки"
-- Если filteredCount < originalCount: "✅ Фильтр отсек N нерелевантных чанков"
-- Если filteredCount == originalCount: "✅ Все чанки прошли фильтр - высокая релевантность"
+**Automatic analysis:**
+- If filteredCount == 0: "❌ Filter removed all chunks"
+- If filteredCount < originalCount: "✅ Filter removed N irrelevant chunks"
+- If filteredCount == originalCount: "✅ All chunks passed filter - high relevance"
 
 ---
 
-### /setThreshold <0.0-1.0> (НОВИНКА - День 18)
+### /setThreshold <0.0-1.0> (NEW - Day 18)
 
-Настраивает порог релевантности для RAG фильтрации.
+Configures relevance threshold for RAG filtering.
 
-**Использование:**
+**Usage:**
 
-**Показать текущий порог:**
+**Show current threshold:**
 ```
 /setThreshold
 ```
 
-**Ответ:**
+**Response:**
 ```
-📊 Текущий порог релевантности: 0.5
+📊 Current relevance threshold: 0.5
 
-Использование: /setThreshold <значение>
-Диапазон: 0.0 - 1.0
+Usage: /setThreshold <value>
+Range: 0.0 - 1.0
 
-Рекомендации:
-• 0.3-0.4 (низкий) - больше результатов, может быть шум
-• 0.5-0.6 (средний) - сбалансированный подход
-• 0.7-0.8 (высокий) - только высокорелевантные чанки
+Recommendations:
+• 0.3-0.4 (low) - more results, may have noise
+• 0.5-0.6 (medium) - balanced approach
+• 0.7-0.8 (high) - only highly relevant chunks
 ```
 
-**Изменить порог:**
+**Change threshold:**
 ```
 /setThreshold 0.6
 ```
 
-**Ответ:**
+**Response:**
 ```
-✅ Порог релевантности обновлен: 0.6
+✅ Relevance threshold updated: 0.6
 
-Интерпретация:
-• Средний порог - сбалансированный подход
+Interpretation:
+• Medium threshold - balanced approach
 
-Протестируйте с помощью /compareRag <вопрос>
+Test with /compareRag <question>
 ```
 
-**Рекомендации по выбору порога:**
+**Threshold selection recommendations:**
 
-| Порог | Интерпретация | Результаты | Рекомендации |
-|-------|---------------|------------|--------------|
-| 0.3-0.4 | Низкий | Больше чанков, может быть шум | Для широкого поиска |
-| 0.5-0.6 | Средний | Сбалансированный подход | **Рекомендуется** (по умолчанию) |
-| 0.7-0.8 | Высокий | Только высокорелевантные | Для точных ответов |
-| 0.9+ | Очень высокий | Минимум результатов | Для точного совпадения |
+| Threshold | Interpretation | Results | Recommendations |
+|-----------|----------------|---------|-----------------|
+| 0.3-0.4 | Low | More chunks, may have noise | For broad search |
+| 0.5-0.6 | Medium | Balanced approach | **Recommended** (default) |
+| 0.7-0.8 | High | Only highly relevant | For precise answers |
+| 0.9+ | Very high | Minimum results | For exact matches |
 
-## Технические детали RAG
+## RAG Technical Details
 
-### Векторный поиск
+### Vector Search
 
-**Алгоритм косинусного сходства:**
+**Cosine similarity algorithm:**
 ```
 cosine_similarity(A, B) = (A · B) / (||A|| × ||B||)
 
-где:
-A · B = скалярное произведение векторов
-||A|| = норма вектора A (sqrt(sum(a_i^2)))
-||B|| = норма вектора B (sqrt(sum(b_i^2)))
+where:
+A · B = dot product of vectors
+||A|| = norm of vector A (sqrt(sum(a_i^2)))
+||B|| = norm of vector B (sqrt(sum(b_i^2)))
 ```
 
-**Результат:** значение в диапазоне [0, 1]
-- `1.0` - векторы идентичны (100% сходство)
-- `0.5` - умеренное сходство (50%)
-- `0.0` - векторы ортогональны (0% сходство)
+**Result:** value in range [0, 1]
+- `1.0` - vectors identical (100% similarity)
+- `0.5` - moderate similarity (50%)
+- `0.0` - vectors orthogonal (0% similarity)
 
-**Размерность векторов:** 768 (модель nomic-embed-text)
+**Vector dimension:** 768 (nomic-embed-text model)
 
-**Процесс поиска:**
-1. Загрузка всех embeddings из JSON (63+ чанка)
-2. Генерация embedding для вопроса (768-мерный вектор)
-3. Вычисление косинусного сходства с каждым чанком
-4. Сортировка по убыванию релевантности
-5. Фильтрация по порогу (≥ ragRelevanceThreshold)
-6. Возврат топ-K отфильтрованных результатов
+**Search process:**
+1. Load all embeddings from JSON (63+ chunks)
+2. Generate embedding for question (768-dimensional vector)
+3. Calculate cosine similarity with each chunk
+4. Sort by descending relevance
+5. Filter by threshold (≥ ragRelevanceThreshold)
+6. Return top-K filtered results
 
-### Фильтр релевантности (День 18)
+### Relevance Filter (Day 18)
 
-**Проблема до реализации:**
-- Векторный поиск находил топ-5 чанков
-- ВСЕ чанки передавались в LLM, даже нерелевантные
-- Это создавало шум и ухудшало ответы
+**Problem before implementation:**
+- Vector search found top-5 chunks
+- ALL chunks passed to LLM, even irrelevant ones
+- This created noise and degraded answers
 
-**Решение:**
-Двухэтапная фильтрация:
-1. Векторный поиск → топ-K кандидатов
-2. **Фильтр** → отсекает чанки с релевантностью < порога
-3. Только релевантные чанки → LLM
+**Solution:**
+Two-stage filtering:
+1. Vector search → top-K candidates
+2. **Filter** → removes chunks with relevance < threshold
+3. Only relevant chunks → LLM
 
-**Преимущества:**
-- Меньше шума → точнее ответы
-- Меньше токенов → быстрее генерация
-- Гибкая настройка → пользователь контролирует баланс
+**Advantages:**
+- Less noise → more accurate answers
+- Fewer tokens → faster generation
+- Flexible configuration → user controls balance
 
-**Накладные расходы:** < 10ms (фильтрация в памяти)
+**Overhead:** < 10ms (in-memory filtering)
 
-### Чанкинг документации
+### Documentation Chunking
 
-**Параметры:**
-- Размер чанка: 200 символов
-- Перекрытие (overlap): 50 символов
-- Предобработка: удаление код-блоков, разбиение на абзацы
+**Parameters:**
+- Chunk size: 200 characters
+- Overlap: 50 characters
+- Preprocessing: remove code blocks, split into paragraphs
 
-**Пример чанка:**
+**Chunk example:**
 ```json
 {
-  "text": "# CLAUDE.md\n\nThis file provides guidance...",
+  "text": "# TeleGaGa Documentation\n\nThis is a Telegram bot...",
   "embedding": [-0.059, -0.292, -2.586, ...],
   "index": 0
 }
 ```
 
-### Модели Ollama
+### Ollama Models
 
-| Модель | Назначение | Размер | Параметры |
-|--------|------------|--------|-----------|
-| **nomic-embed-text:latest** | Генерация embeddings | 274MB | 137M |
-| **llama3.2:1b** | Генерация ответов | 1.3GB | 1.2B |
+| Model | Purpose | Size | Parameters |
+|-------|---------|------|------------|
+| **nomic-embed-text:latest** | Generate embeddings | 274MB | 137M |
+| **llama3.2:1b** | Generate answers | 1.3GB | 1.2B |
 
-### Производительность
+### Performance
 
-**Время генерации embeddings (readme.md, 63 чанка):**
-- Локально (Ollama): ~45 секунд
-- CPU: Intel/Apple Silicon (зависит от железа)
-- RAM: ~2GB для модели nomic-embed-text
+**Embeddings generation time (readme.md, 63 chunks):**
+- Locally (Ollama): ~45 seconds
+- CPU: Intel/Apple Silicon (hardware dependent)
+- RAM: ~2GB for nomic-embed-text model
 
-**Время выполнения /testRag:**
-- Поиск чанков: ~1-2 секунды
-- Генерация ответа БЕЗ RAG: ~3-5 секунд
-- Генерация ответа С RAG: ~5-10 секунд (больше токенов)
-- **Итого:** ~10-20 секунд на полный цикл
+**/testRag execution time:**
+- Chunk search: ~1-2 seconds
+- Answer generation WITHOUT RAG: ~3-5 seconds
+- Answer generation WITH RAG: ~5-10 seconds (more tokens)
+- **Total:** ~10-20 seconds for full cycle
 
-**Время выполнения /compareRag:**
-- 3 генерации: ~20-30 секунд
-- Векторный поиск: ~2-3 секунды
-- Фильтрация: < 10ms
+**/compareRag execution time:**
+- 3 generations: ~20-30 seconds
+- Vector search: ~2-3 seconds
+- Filtering: < 10ms
 
-## Примеры использования RAG
+## RAG Usage Examples
 
-### Пример 1: Технический вопрос (RAG помогает)
+### Example 1: Technical question (RAG helps)
 
-**Вопрос:** `/testRag Какие MCP серверы используются в проекте?`
+**Question:** `/testRag What MCP servers are used in the project?`
 
-**Результат:**
-- Без RAG: Общий ответ или "не знаю"
-- С RAG: Точный список всех 5 MCP инструментов из документации
-- Релевантность: ~85-90%
+**Result:**
+- Without RAG: General answer or "don't know"
+- With RAG: Exact list of all 5 MCP tools from documentation
+- Relevance: ~85-90%
 
-### Пример 2: Вопрос вне документации (RAG не помогает)
+### Example 2: Question outside documentation (RAG doesn't help)
 
-**Вопрос:** `/testRag Какая погода в Москве сегодня?`
+**Question:** `/testRag What's the weather in Moscow today?`
 
-**Результат:**
-- Без RAG: "Я не знаю текущую погоду"
-- С RAG: Аналогичный ответ (в документации нет информации о погоде)
-- Релевантность: ~20-30%
+**Result:**
+- Without RAG: "I don't know current weather"
+- With RAG: Similar answer (no weather info in documentation)
+- Relevance: ~20-30%
 
-### Пример 3: Сравнение подходов
+### Example 3: Approach comparison
 
-**Вопрос:** `/compareRag Расскажи про RAG`
+**Question:** `/compareRag Tell me about RAG`
 
-**Результат с порогом 0.5:**
-- Подход 1 (БЕЗ RAG): Общее описание RAG
-- Подход 2 (RAG без фильтра): 5 чанков (релевантность 0.72, 0.65, 0.48, 0.35, 0.28)
-- Подход 3 (RAG + фильтр): 2 чанка (отсечены 3 нерелевантных)
-- **Анализ:** "✅ Фильтр отсек 3 нерелевантных чанков"
+**Result with threshold 0.5:**
+- Approach 1 (WITHOUT RAG): General RAG description
+- Approach 2 (RAG without filter): 5 chunks (relevance 0.72, 0.65, 0.48, 0.35, 0.28)
+- Approach 3 (RAG + filter): 2 chunks (removed 3 irrelevant)
+- **Analysis:** "✅ Filter removed 3 irrelevant chunks"
 
-## Ограничения RAG
+## RAG Limitations
 
-1. **Размер чанков**: Фиксированный (200 символов), может разрезать предложения
-2. **Топ-K**: Всегда 5 кандидатов перед фильтрацией
-3. **Одна база**: Только `readme.md`, нет поддержки нескольких документов
-4. **Язык**: Лучше работает с английским текстом (модель обучалась на английском)
-5. **Контекст LLM**: llama3.2:1b - небольшая модель, может пропускать детали
+1. **Chunk size**: Fixed (200 characters), may cut sentences
+2. **Top-K**: Always 5 candidates before filtering
+3. **Single database**: Only `readme.md`, no multi-document support
+4. **Language**: Works better with English text (model trained on English)
+5. **LLM context**: llama3.2:1b - small model, may miss details
 
-## Будущие улучшения RAG
+## Future RAG Improvements
 
-### Краткосрочные
-- [ ] LLM-based Reranker для более точной семантической оценки
-- [ ] Адаптивный порог (автоподстройка по распределению релевантности)
-- [ ] Гибридный поиск (векторный + BM25 keyword-based)
-- [ ] Команда /ragStats для статистики использования
-- [ ] Многофайловый RAG (поиск по нескольким документам)
+### Short-term
+- [ ] LLM-based Reranker for more accurate semantic evaluation
+- [ ] Adaptive threshold (auto-adjust by relevance distribution)
+- [ ] Hybrid search (vector + BM25 keyword-based)
+- [ ] /ragStats command for usage statistics
+- [ ] Multi-file RAG (search across multiple documents)
 
-### Долгосрочные
-- [ ] Семантическое чанкирование (разбиение по смыслу, а не по символам)
-- [ ] Использование более мощной модели (llama3:8b)
-- [ ] Графовая RAG (связи между чанками)
-- [ ] Кэширование embeddings вопросов
-- [ ] Интеграция с внешними источниками данных
+### Long-term
+- [ ] Semantic chunking (split by meaning, not characters)
+- [ ] Use more powerful model (llama3:8b)
+- [ ] Graph RAG (connections between chunks)
+- [ ] Question embedding caching
+- [ ] Integration with external data sources
 
 ---
 
-# Система напоминаний
+# Reminder System
 
-Полнофункциональная система управления напоминаниями с автоматической ежедневной отправкой через Telegram.
+Full-featured reminder management system with automatic daily delivery via Telegram.
 
-## Архитектура напоминаний
+## Reminder Architecture
 
 ### 1. MCP Reminders Server (Node.js)
 
-**Расположение:** `mcp-reminders-server/`
+**Location:** `mcp-reminders-server/`
 
-Предоставляет 3 MCP инструмента:
-- `create_reminder` - создание нового напоминания
-- `get_reminders` - получение списка за период
-- `delete_reminder` - удаление/завершение напоминания
+Provides 3 MCP tools:
+- `create_reminder` - create new reminder
+- `get_reminders` - get list for period
+- `delete_reminder` - delete/complete reminder
 
-**Хранилище:** `mcp-reminders-server/storage/<chatId>.json`
-- Изоляция данных по chatId
-- Автоматическое создание файлов
-- Валидация всех параметров
+**Storage:** `mcp-reminders-server/storage/<chatId>.json`
+- Data isolation by chatId
+- Automatic file creation
+- Validation of all parameters
 
 ### 2. ChatSettingsManager
 
-**Хранилище:** `chat_settings/<chatId>_settings.json`
+**Storage:** `chat_settings/<chatId>_settings.json`
 
 ```kotlin
 data class ChatSettings(
     val chatId: Long,
     val temperature: Float = 0.87F,
-    val reminderTime: String? = null,        // HH:mm формат
+    val reminderTime: String? = null,        // HH:mm format
     val reminderEnabled: Boolean = false,
     val lastReminderSent: String? = null,    // ISO 8601 timestamp
 
-    // RAG настройки (День 18)
+    // RAG settings (Day 18)
     val ragRelevanceThreshold: Float = 0.5F,
     val ragEnabled: Boolean = true,
     val ragTopK: Int = 5
@@ -1146,376 +1146,376 @@ data class ChatSettings(
 
 ### 3. ReminderScheduler
 
-**Расположение:** `src/main/kotlin/ru/dikoresearch/domain/ReminderScheduler.kt`
+**Location:** `src/main/kotlin/ru/dikoresearch/domain/ReminderScheduler.kt`
 
-Фоновый планировщик с ежеминутной проверкой:
-- Проверяет время отправки для всех активных чатов
-- Предотвращает повторную отправку в один день
-- Использует LLM + MCP для генерации сообщений
-- Автоматическая обработка ошибок
+Background scheduler with per-minute check:
+- Checks delivery time for all active chats
+- Prevents duplicate delivery same day
+- Uses LLM + MCP for message generation
+- Automatic error handling
 
-## Команды напоминаний
+## Reminder Commands
 
 ### /setReminderTime HH:mm
 
-Настройка времени ежедневных напоминаний.
+Configure daily reminder time.
 
-**Пример:**
+**Example:**
 ```
 /setReminderTime 09:00
 ```
 
-**Результат:**
-- ⏰ Напоминания будут приходить ежедневно в 09:00
+**Result:**
+- ⏰ Reminders will be sent daily at 09:00
 - reminderEnabled = true
-- Готовность к автоматической отправке
+- Ready for automatic delivery
 
-**Валидация:**
-- Формат HH:mm (00:00 до 23:59)
-- Регулярное выражение: `^([01]\d|2[0-3]):([0-5]\d)$`
+**Validation:**
+- Format HH:mm (00:00 to 23:59)
+- Regular expression: `^([01]\d|2[0-3]):([0-5]\d)$`
 
 ### /disableReminders
 
-Отключение автоматических напоминаний.
+Disable automatic reminders.
 
-**Результат:**
-- 🔕 Автоматические напоминания отключены
+**Result:**
+- 🔕 Automatic reminders disabled
 - reminderEnabled = false
-- Напоминания не отправляются автоматически
-- Данные сохраняются
+- Reminders not sent automatically
+- Data preserved
 
 ### /enableMcp
 
-Включение MCP режима для работы с напоминаниями.
+Enable MCP mode for reminder operations.
 
-**Доступные операции после активации:**
-- "Напомни мне завтра купить молоко"
-- "Что у меня на сегодня?"
-- "Удали напоминание про встречу"
+**Available operations after activation:**
+- "Remind me tomorrow to buy milk"
+- "What do I have today?"
+- "Delete the meeting reminder"
 
-**Примечание:** MCP активен по умолчанию для всех новых чатов.
+**Note:** MCP active by default for all new chats.
 
-## Рабочий процесс напоминаний
+## Reminder Workflow
 
-### Создание напоминания
-
-```
-1. User: "Напомни мне завтра купить молоко"
-   ↓
-2. ChatOrchestrator добавляет контекст с chatId и текущей датой
-   ↓
-3. GigaChat анализирует запрос
-   - Понимает "завтра" относительно текущей даты
-   - Вычисляет dueDate = 2026-02-05
-   ↓
-4. GigaChat вызывает create_reminder через MCP
-   - arguments: {"chatId":"123", "dueDate":"2026-02-05", "text":"купить молоко"}
-   ↓
-5. MCP сервер создает напоминание в storage/<chatId>.json
-   ↓
-6. Ответ пользователю: "✅ Напоминание создано на завтра"
-```
-
-### Автоматическая отправка (утренние напоминания)
+### Creating Reminder
 
 ```
-1. ReminderScheduler проверяет время каждую минуту
+1. User: "Remind me tomorrow to buy milk"
    ↓
-2. Находит чаты с reminderTime = текущее время (09:00)
+2. ChatOrchestrator adds context with chatId and current date
    ↓
-3. Проверяет что сегодня еще не отправляли (lastReminderSent != сегодня)
+3. GigaChat analyzes request
+   - Understands "tomorrow" relative to current date
+   - Calculates dueDate = 2026-02-05
    ↓
-4. Формирует промпт для ChatOrchestrator:
-   "Используй get_reminders для получения дел на сегодня.
-    Используй get_weather для погоды в Санкт-Петербурге.
-    Используй get_chuck_norris_joke для шутки дня."
+4. GigaChat calls create_reminder via MCP
+   - arguments: {"chatId":"123", "dueDate":"2026-02-05", "text":"buy milk"}
    ↓
-5. ChatOrchestrator вызывает LLM с MCP
+5. MCP server creates reminder in storage/<chatId>.json
    ↓
-6. LLM последовательно вызывает:
-   - get_reminders (chatId, startDate=сегодня, endDate=сегодня)
-   - get_weather (city="Санкт-Петербург", lang="ru")
+6. Response to user: "✅ Reminder created for tomorrow"
+```
+
+### Automatic Delivery (Morning Reminders)
+
+```
+1. ReminderScheduler checks time every minute
+   ↓
+2. Finds chats with reminderTime = current time (09:00)
+   ↓
+3. Checks not already sent today (lastReminderSent != today)
+   ↓
+4. Forms prompt for ChatOrchestrator:
+   "Use get_reminders to get today's tasks.
+    Use get_weather for weather in St. Petersburg.
+    Use get_chuck_norris_joke for joke of the day."
+   ↓
+5. ChatOrchestrator calls LLM with MCP
+   ↓
+6. LLM sequentially calls:
+   - get_reminders (chatId, startDate=today, endDate=today)
+   - get_weather (city="St. Petersburg", lang="en")
    - get_chuck_norris_joke ()
    ↓
-7. LLM форматирует красивое сообщение с эмодзи:
-   "🌅 Доброе утро! Вот твои дела на сегодня:
-    1. 📝 Купить молоко
-    2. 📝 Позвонить маме в 10:00
+7. LLM formats beautiful message with emojis:
+   "🌅 Good morning! Here are your tasks for today:
+    1. 📝 Buy milk
+    2. 📝 Call mom at 10:00
 
-    🌤️ Погода в Санкт-Петербурге:
-    +3°C, облачно, влажность 78%, ветер 5 м/с
+    🌤️ Weather in St. Petersburg:
+    +3°C, cloudy, humidity 78%, wind 5 m/s
 
-    😄 Шутка дня от Чака Норриса:
-    [Переведенная шутка на русском]"
+    😄 Joke of the day from Chuck Norris:
+    [Translated joke in user's language]"
    ↓
-8. Отправка сообщения в Telegram
+8. Send message to Telegram
    ↓
-9. Обновление lastReminderSent = "2026-02-04T09:00:00+03:00"
+9. Update lastReminderSent = "2026-02-04T09:00:00+03:00"
 ```
 
-### Формат утреннего сообщения
+### Morning Message Format
 
 ```
-🌅 Доброе утро! Вот твои дела на сегодня:
+🌅 Good morning! Here are your tasks for today:
 
-📝 Напоминания:
-1. В 10:00 - позвонить маме
-2. Купить молоко в магазине
-3. В 15:00 - встреча с командой
+📝 Reminders:
+1. At 10:00 - call mom
+2. Buy milk at the store
+3. At 15:00 - team meeting
 
-🌤️ Погода в Санкт-Петербурге:
-Температура: +3°C
-Описание: Облачно с прояснениями
-Влажность: 78%
-Ветер: 5 м/с (Северо-Западный)
+🌤️ Weather in St. Petersburg:
+Temperature: +3°C
+Description: Cloudy with clearings
+Humidity: 78%
+Wind: 5 m/s (Northwest)
 
-😄 Шутка дня от Чака Норриса:
-Чак Норрис может делить на ноль.
+😄 Joke of the day from Chuck Norris:
+Chuck Norris can divide by zero.
 
-Хорошего дня! 🌟
+Have a great day! 🌟
 ```
 
-## Безопасность напоминаний
+## Reminder Security
 
-### Изоляция данных
+### Data Isolation
 
-**Проблема:** Как предотвратить доступ к напоминаниям других пользователей?
+**Problem:** How to prevent access to other users' reminders?
 
-**Решение:**
-1. Каждый chatId имеет собственный файл хранилища: `storage/<chatId>.json`
-2. MCP сервер проверяет chatId во всех операциях
-3. Автоматическая подстановка chatId в контекст LLM
+**Solution:**
+1. Each chatId has own storage file: `storage/<chatId>.json`
+2. MCP server checks chatId in all operations
+3. Automatic chatId substitution in LLM context
 
-**Контекст в ChatOrchestrator:**
+**Context in ChatOrchestrator:**
 ```kotlin
 val contextMessage = GigaChatMessage(
     role = "system",
     content = """
-ВАЖНО: Твой chatId = $chatId.
-ВСЕГДА используй этот chatId в функциях create_reminder, get_reminders, delete_reminder.
-НИКОГДА не используй другие chatId.
+IMPORTANT: Your chatId = $chatId.
+ALWAYS use this chatId in create_reminder, get_reminders, delete_reminder functions.
+NEVER use other chatId.
 
-ТЕКУЩАЯ ДАТА И ВРЕМЯ (timezone: Europe/Moscow):
-- Дата: 2026-02-04 (вторник)
-- Время: 09:00:00
+CURRENT DATE AND TIME (timezone: Europe/Moscow):
+- Date: 2026-02-04 (Tuesday)
+- Time: 09:00:00
 
-Это поможет тебе правильно вычислять "сегодня", "завтра", "послезавтра".
+This helps you correctly calculate "today", "tomorrow", "day after tomorrow".
     """.trimIndent()
 )
 history.add(1, contextMessage)
 ```
 
-После обработки контекстное сообщение удаляется из истории.
+After processing, context message is removed from history.
 
-### Формат даты
+### Date Format
 
-**Требования:**
+**Requirements:**
 - YYYY-MM-DD (ISO 8601)
-- Валидация в MCP сервере
-- LLM должна правильно вычислять относительные даты
+- Validation in MCP server
+- LLM must correctly calculate relative dates
 
-**Примеры:**
-- "сегодня" → 2026-02-04
-- "завтра" → 2026-02-05
-- "послезавтра" → 2026-02-06
-- "в пятницу" → ближайшая пятница от текущей даты
+**Examples:**
+- "today" → 2026-02-04
+- "tomorrow" → 2026-02-05
+- "day after tomorrow" → 2026-02-06
+- "on Friday" → nearest Friday from current date
 
-**Важно:** Автоматическая инъекция текущей даты в системный промпт решает проблему неправильного вычисления дат LLM.
+**Important:** Automatic current date injection in system prompt solves LLM incorrect date calculation problem.
 
-## Примеры использования
+## Usage Examples
 
-### Настройка напоминаний
+### Setting Up Reminders
 
 ```bash
-# Шаг 1: Установить время ежедневных напоминаний
+# Step 1: Set daily reminder time
 /setReminderTime 09:00
 
-# Шаг 2: Активировать MCP (если еще не активен)
+# Step 2: Activate MCP (if not already active)
 /enableMcp
 
-# Шаг 3: Создать напоминания
-User: Напомни мне завтра купить молоко
-Bot: ✅ Напоминание создано на завтра (2026-02-05)
+# Step 3: Create reminders
+User: Remind me tomorrow to buy milk
+Bot: ✅ Reminder created for tomorrow (2026-02-05)
 
-User: Напомни мне в пятницу позвонить маме в 10:00
-Bot: ✅ Напоминание создано на пятницу (2026-02-07)
+User: Remind me on Friday to call mom at 10:00
+Bot: ✅ Reminder created for Friday (2026-02-07)
 ```
 
-### Просмотр напоминаний
+### Viewing Reminders
 
 ```bash
-User: Что у меня на сегодня?
-Bot: 📝 На сегодня (2026-02-04) у тебя 2 напоминания:
-     1. Купить молоко
-     2. В 15:00 - встреча с командой
+User: What do I have today?
+Bot: 📝 For today (2026-02-04) you have 2 reminders:
+     1. Buy milk
+     2. At 15:00 - team meeting
 
-User: Покажи мои дела на эту неделю
-Bot: [Список всех напоминаний за неделю]
+User: Show my tasks for this week
+Bot: [List of all reminders for the week]
 ```
 
-### Управление напоминаниями
+### Managing Reminders
 
 ```bash
-User: Удали напоминание про молоко
-Bot: [Находит напоминание про молоко через get_reminders]
-     [Вызывает delete_reminder с reminderId]
-     ✅ Напоминание про молоко удалено
+User: Delete the milk reminder
+Bot: [Finds milk reminder via get_reminders]
+     [Calls delete_reminder with reminderId]
+     ✅ Milk reminder deleted
 
-# Отключить автоматическую отправку
+# Disable automatic delivery
 /disableReminders
-Bot: 🔕 Автоматические напоминания отключены
+Bot: 🔕 Automatic reminders disabled
 ```
 
 ## Troubleshooting
 
-### Проблема: Напоминания не приходят автоматически
+### Problem: Reminders not delivered automatically
 
-**Диагностика:**
+**Diagnostics:**
 ```bash
-# Проверить настройки чата
+# Check chat settings
 cat chat_settings/<chatId>_settings.json
 
-# Должно быть:
+# Should have:
 # "reminderTime": "09:00"
 # "reminderEnabled": true
 ```
 
-**Решение:**
-1. Проверить что /setReminderTime выполнена
-2. Проверить что reminderEnabled = true
-3. Проверить логи планировщика (без спама, только при срабатывании)
-4. Проверить что MCP reminders сервер работает: `lsof -ti:3002`
+**Solution:**
+1. Check that /setReminderTime executed
+2. Check that reminderEnabled = true
+3. Check scheduler logs (no spam, only on trigger)
+4. Check that MCP reminders server running: `lsof -ti:3002`
 
-### Проблема: Неправильная дата напоминания
+### Problem: Incorrect reminder date
 
-**Пример:** User говорит "сегодня", но создается напоминание на вчера.
+**Example:** User says "today", but reminder created for yesterday.
 
-**Причина:** LLM не знает текущую дату.
+**Reason:** LLM doesn't know current date.
 
-**Решение:** Автоматическая инъекция даты в системный промпт (уже реализовано).
+**Solution:** Automatic date injection in system prompt (already implemented).
 
-**Проверка в логах:**
+**Check in logs:**
 ```
-🔧 Добавляем контекст в системный промпт...
-ТЕКУЩАЯ ДАТА И ВРЕМЯ (timezone: Europe/Moscow):
-- Дата: 2026-02-04 (вторник)
-- Время: 09:00:00
-```
-
-### Проблема: Шутки на английском
-
-**Причина:** Chuck Norris API возвращает шутки на английском.
-
-**Решение:** Системный промпт McpEnabledRole содержит инструкцию:
-
-```
-Когда получаешь результат от get_chuck_norris_joke:
-- API возвращает шутки НА АНГЛИЙСКОМ языке
-- Ты ДОЛЖЕН ПЕРЕВЕСТИ шутку на РУССКИЙ язык
-- Делай естественный перевод с сохранением юмора
+🔧 Adding context to system prompt...
+CURRENT DATE AND TIME (timezone: Europe/Moscow):
+- Date: 2026-02-04 (Tuesday)
+- Time: 09:00:00
 ```
 
-**Проверка:** В финальном ответе пользователю НЕ должно быть английского текста.
+### Problem: Jokes in English
+
+**Reason:** Chuck Norris API returns jokes in English.
+
+**Solution:** System prompt McpEnabledRole contains instruction:
+
+```
+When you get result from get_chuck_norris_joke:
+- API returns jokes IN ENGLISH
+- You MUST TRANSLATE joke to user's language
+- Make natural translation preserving humor
+```
+
+**Check:** Final user answer should NOT have English text.
 
 ---
 
-# Команды бота
+# Bot Commands
 
-## Общие команды
+## General Commands
 
 ### /start
-Приветствие и список всех доступных команд.
+Greeting and list of all available commands.
 
-**Результат:**
+**Result:**
 ```
-👋 Привет! Я TeleGaGa бот с поддержкой RAG.
+👋 Hello! I'm TeleGaGa bot with RAG support.
 
-🤖 AI модели:
-• GigaChat - основная модель для чата
-• Ollama (llama3.2:1b) - локальная генерация
-• Ollama (nomic-embed-text) - локальные embeddings
+🤖 AI models:
+• GigaChat - main model for chat
+• Ollama (llama3.2:1b) - local generation
+• Ollama (nomic-embed-text) - local embeddings
 
-📋 Доступные команды:
-/changeRole <текст> - изменить системный промпт
-/changeT <число> - изменить температуру (0.0-1.0)
-/clearChat - очистить историю чата
+📋 Available commands:
+/changeRole <text> - change system prompt
+/changeT <number> - change temperature (0.0-1.0)
+/clearChat - clear chat history
 
-🔧 MCP инструменты:
-/enableMcp - активировать MCP режим (по умолчанию активен)
-/listTools - показать доступные MCP инструменты
+🔧 MCP tools:
+/enableMcp - activate MCP mode (active by default)
+/listTools - show available MCP tools
 
-🧠 RAG команды:
-/createEmbeddings - создать embeddings из rag_docs/readme.md
-/testRag <вопрос> - сравнить ответы с RAG и без RAG
-/compareRag <вопрос> - сравнить 3 подхода (без RAG, RAG, RAG+фильтр)
-/setThreshold <0.0-1.0> - настроить порог релевантности
+🧠 RAG commands:
+/createEmbeddings - create embeddings from rag_docs/readme.md
+/testRag <question> - compare answers with RAG and without RAG
+/compareRag <question> - compare 3 approaches (no RAG, RAG, RAG+filter)
+/setThreshold <0.0-1.0> - configure relevance threshold
 
-⏰ Управление напоминаниями:
-/setReminderTime HH:mm - установить время ежедневных напоминаний
-/disableReminders - отключить автоматические напоминания
+⏰ Reminder management:
+/setReminderTime HH:mm - set daily reminder time
+/disableReminders - disable automatic reminders
 
-💡 Для работы embeddings нужна запущенная Ollama:
+💡 For embeddings to work, Ollama must be running:
 ollama pull nomic-embed-text
 ```
 
 ### /changeRole <text>
-Обновляет системный промпт для чата.
+Updates system prompt for chat.
 
-**Пример:**
+**Example:**
 ```
-/changeRole Ты эксперт по Kotlin разработке
+/changeRole You are a Kotlin development expert
 ```
 
-**Результат:**
-- Системный промпт обновлен
-- История чата очищается
-- Применяется ко всем последующим сообщениям
+**Result:**
+- System prompt updated
+- Chat history cleared
+- Applied to all subsequent messages
 
 ### /changeT <float>
-Изменяет параметр температуры модели (0.0 - 1.0).
+Changes model temperature parameter (0.0 - 1.0).
 
-**Пример:**
+**Example:**
 ```
 /changeT 0.5
 ```
 
-**Результат:**
-- Новая температура ответов: 0.5
-- Настройка сохраняется персистентно
+**Result:**
+- New answer temperature: 0.5
+- Setting saved persistently
 
-**Рекомендации:**
-- 0.0-0.3: Детерминированные, предсказуемые ответы
-- 0.4-0.7: Сбалансированные, разнообразные ответы
-- 0.8-1.0: Креативные, рискованные ответы
+**Recommendations:**
+- 0.0-0.3: Deterministic, predictable answers
+- 0.4-0.7: Balanced, diverse answers
+- 0.8-1.0: Creative, risky answers
 
 **Default:** 0.87
 
 ### /clearChat
-Очищает историю чата.
+Clears chat history.
 
-**Результат:**
-- История чата успешно удалена
-- Файл `chat_history/<chatId>_history.json` удален
-- Системный промпт сбрасывается на McpEnabledRole
+**Result:**
+- Chat history successfully deleted
+- File `chat_history/<chatId>_history.json` deleted
+- System prompt reset to McpEnabledRole
 
-## MCP команды
+## MCP Commands
 
 ### /enableMcp
-Активирует MCP режим для чата.
+Activates MCP mode for chat.
 
-**Результат:**
-- MCP режим активирован
-- Системный промпт устанавливается на McpEnabledRole
-- Доступны все 5 MCP инструментов
+**Result:**
+- MCP mode activated
+- System prompt set to McpEnabledRole
+- All 5 MCP tools available
 
-**Примечание:** MCP активен по умолчанию для всех новых чатов.
+**Note:** MCP active by default for all new chats.
 
 ### /listTools
-Показывает список доступных MCP инструментов.
+Shows list of available MCP tools.
 
-**Результат:**
+**Result:**
 ```
-Доступные MCP инструменты (5):
+Available MCP tools (5):
 • get_weather
 • create_reminder
 • get_reminders
@@ -1523,97 +1523,97 @@ ollama pull nomic-embed-text
 • get_chuck_norris_joke
 ```
 
-**Если MCP недоступен:**
+**If MCP unavailable:**
 ```
-MCP сервис недоступен. Попробуйте перезапустить бота.
+MCP service unavailable. Try restarting the bot.
 ```
 
-## RAG команды
+## RAG Commands
 
 ### /createEmbeddings
-Создает embeddings из `rag_docs/readme.md`.
+Creates embeddings from `rag_docs/readme.md`.
 
-См. раздел [RAG система](#rag-система) для деталей.
+See [RAG System](#rag-system) section for details.
 
 ### /testRag <question>
-Сравнивает ответы с RAG и без RAG.
+Compares answers with RAG and without RAG.
 
-См. раздел [RAG система](#rag-система) для деталей.
+See [RAG System](#rag-system) section for details.
 
 ### /compareRag <question>
-Сравнивает 3 подхода (без RAG, RAG, RAG+фильтр).
+Compares 3 approaches (no RAG, RAG, RAG+filter).
 
-См. раздел [RAG система](#rag-система) для деталей.
+See [RAG System](#rag-system) section for details.
 
 ### /setThreshold <0.0-1.0>
-Настраивает порог релевантности для RAG фильтрации.
+Configures relevance threshold for RAG filtering.
 
-См. раздел [RAG система](#rag-система) для деталей.
+See [RAG System](#rag-system) section for details.
 
-## Команды напоминаний
+## Reminder Commands
 
 ### /setReminderTime HH:mm
-Устанавливает время ежедневных напоминаний.
+Sets daily reminder time.
 
-См. раздел [Система напоминаний](#система-напоминаний) для деталей.
+See [Reminder System](#reminder-system) section for details.
 
 ### /disableReminders
-Отключает автоматические напоминания.
+Disables automatic reminders.
 
-См. раздел [Система напоминаний](#система-напоминаний) для деталей.
+See [Reminder System](#reminder-system) section for details.
 
 ---
 
-# Тестирование
+# Testing
 
-## План тестирования
+## Testing Plan
 
-### 1. Подготовка к тестированию
+### 1. Testing Preparation
 
 ```bash
-# Очистить все данные
+# Clear all data
 rm -rf chat_history/
 rm -rf chat_settings/
 rm -rf mcp-reminders-server/storage/
 
-# Пересобрать проект
+# Rebuild project
 ./gradlew clean build
 
-# Запустить бота
+# Start bot
 ./gradlew run
 ```
 
-### 2. Проверка запуска
+### 2. Startup Check
 
-**В логах должны быть:**
+**Logs should have:**
 ```
 ✅ weather: 1 tools on port 3001
 ✅ reminders: 3 tools on port 3002
 ✅ chuck: 1 tools on port 3003
-✅ Все MCP серверы запущены и подключены
-🕐 ReminderScheduler запущен
-Telegram бот запущен и ожидает сообщений
+✅ All MCP servers started and connected
+🕐 ReminderScheduler started
+Telegram bot started and waiting for messages
 ```
 
-**НЕ должно быть:**
+**Should NOT have:**
 ```
 ❌ EADDRINUSE: address already in use
 ❌ Failed to initialize
 ❌ processesAlive=false
 ```
 
-### 3. Тестирование базовых команд
+### 3. Testing Basic Commands
 
-#### Тест: /start
+#### Test: /start
 ```
 User: /start
-Bot: [Приветственное сообщение + список команд]
+Bot: [Welcome message + command list]
 ```
 
-#### Тест: /listTools
+#### Test: /listTools
 ```
 User: /listTools
-Bot: Доступные MCP инструменты (5):
+Bot: Available MCP tools (5):
      • get_weather
      • create_reminder
      • get_reminders
@@ -1621,167 +1621,167 @@ Bot: Доступные MCP инструменты (5):
      • get_chuck_norris_joke
 ```
 
-#### Тест: /changeT
+#### Test: /changeT
 ```
 User: /changeT 0.5
-Bot: Новая температура ответов: 0.5
+Bot: New answer temperature: 0.5
 ```
 
-### 4. Тестирование MCP: Погода
+### 4. Testing MCP: Weather
 
 ```
-User: Какая погода в Санкт-Петербурге?
-Bot: [Ответ с температурой, описанием, влажностью, ветром]
+User: What's the weather in St. Petersburg?
+Bot: [Answer with temperature, description, humidity, wind]
 
-# Проверить в логах:
-Модель запросила вызов функции: get_weather
-GigaChatFunctionCall(name=get_weather, arguments={"city":"Санкт-Петербург","lang":"ru"})
+# Check in logs:
+Model requested function call: get_weather
+GigaChatFunctionCall(name=get_weather, arguments={"city":"St. Petersburg","lang":"en"})
 ```
 
-### 5. Тестирование MCP: Напоминания
+### 5. Testing MCP: Reminders
 
 ```
-User: Напомни мне завтра купить молоко
-Bot: ✅ Напоминание создано...
+User: Remind me tomorrow to buy milk
+Bot: ✅ Reminder created...
 
-# Проверить в логах:
-Модель запросила вызов функции: create_reminder
+# Check in logs:
+Model requested function call: create_reminder
 GigaChatFunctionCall(name=create_reminder, arguments={"chatId":"...","dueDate":"2026-02-05",...})
 
-# Проверить файл:
+# Check file:
 cat mcp-reminders-server/storage/<chatId>.json
 ```
 
-### 6. Тестирование RAG
+### 6. Testing RAG
 
 ```
-# Создать embeddings
+# Create embeddings
 User: /createEmbeddings
-Bot: ✅ Embeddings успешно созданы! [статистика]
+Bot: ✅ Embeddings created successfully! [statistics]
 
-# Тестировать RAG
-User: /testRag Какие MCP серверы используются?
-Bot: [Сравнение ответов с RAG и без RAG]
+# Test RAG
+User: /testRag What MCP servers are used?
+Bot: [Comparison of answers with RAG and without RAG]
 
-# Сравнить подходы
-User: /compareRag Какие MCP серверы используются?
-Bot: [Сравнение 3 подходов с анализом]
+# Compare approaches
+User: /compareRag What MCP servers are used?
+Bot: [Comparison of 3 approaches with analysis]
 
-# Настроить порог
+# Configure threshold
 User: /setThreshold 0.6
-Bot: ✅ Порог релевантности обновлен: 0.6
+Bot: ✅ Relevance threshold updated: 0.6
 ```
 
-### 7. Тестирование Scheduler'а
+### 7. Testing Scheduler
 
 ```
-# Настроить время напоминаний на +2 минуты от текущего
+# Set reminder time +2 minutes from current
 User: /setReminderTime 09:02
-Bot: ⏰ Напоминания будут приходить ежедневно в 09:02
+Bot: ⏰ Reminders will be sent daily at 09:02
 
-# Создать напоминания на сегодня
-User: Напомни мне сегодня купить хлеб
-Bot: ✅ Напоминание создано
+# Create reminders for today
+User: Remind me today to buy bread
+Bot: ✅ Reminder created
 
-# Через 2 минуты должно прийти сообщение:
-Bot: 🌅 Доброе утро! Вот твои дела на сегодня:
+# After 2 minutes should receive message:
+Bot: 🌅 Good morning! Here are your tasks for today:
 
-     📝 Напоминания:
-     1. Купить хлеб
+     📝 Reminders:
+     1. Buy bread
 
-     🌤️ Погода в Санкт-Петербурге:
-     [данные погоды]
+     🌤️ Weather in St. Petersburg:
+     [weather data]
 
-     😄 Шутка дня от Чака Норриса:
-     [переведенная шутка]
+     😄 Joke of the day from Chuck Norris:
+     [translated joke]
 ```
 
-### 8. Критерии успешности
+### 8. Success Criteria
 
-✅ **Все тесты пройдены если:**
+✅ **All tests passed if:**
 
 1. **MCP Integration**
-   - Все 5 инструментов работают
-   - Function calling срабатывает автоматически
-   - Результаты MCP корректно обрабатываются
+   - All 5 tools work
+   - Function calling triggers automatically
+   - MCP results processed correctly
 
-2. **RAG система**
-   - Embeddings создаются успешно
-   - Векторный поиск находит релевантные чанки
-   - Фильтр релевантности работает корректно
-   - /compareRag показывает различия между подходами
+2. **RAG system**
+   - Embeddings created successfully
+   - Vector search finds relevant chunks
+   - Relevance filter works correctly
+   - /compareRag shows differences between approaches
 
-3. **Логика напоминаний**
-   - Даты вычисляются правильно ("сегодня", "завтра")
-   - Scheduler отправляет сообщения в нужное время
-   - Нет дубликатов (проверка lastReminderSent)
+3. **Reminder logic**
+   - Dates calculated correctly ("today", "tomorrow")
+   - Scheduler sends messages at right time
+   - No duplicates (lastReminderSent check)
 
-4. **Стабильность**
-   - Нет утечек процессов (порты очищаются)
-   - Нет таймаутов
-   - Graceful shutdown работает корректно
+4. **Stability**
+   - No process leaks (ports cleaned)
+   - No timeouts
+   - Graceful shutdown works correctly
 
 5. **UX**
-   - Нет визуальных MCP markers
-   - Нет спама в логах
-   - Ошибки обрабатываются gracefully
+   - No visual MCP markers
+   - No log spam
+   - Errors handled gracefully
 
-## Утилиты для отладки
+## Debugging Utilities
 
-### Просмотр логов
+### View Logs
 
 ```bash
-# Запустить бота и сохранять логи
+# Start bot and save logs
 ./gradlew run 2>&1 | tee bot.log
 
-# Фильтровать только MCP логи
+# Filter only MCP logs
 grep -E "(MCP|mcp|🔧|⚡|🔍)" bot.log
 
-# Фильтровать только tool calls
+# Filter only tool calls
 grep -E "(functionCall|function_call)" bot.log
 
-# Фильтровать scheduler
-grep -E "(Scheduler|напоминаний)" bot.log
+# Filter scheduler
+grep -E "(Scheduler|reminders)" bot.log
 
-# Фильтровать ошибки
+# Filter errors
 grep -E "(Error|error|❌|Exception)" bot.log
 ```
 
-### Мониторинг MCP процессов
+### Monitor MCP Processes
 
 ```bash
-# Проверить что все 3 процесса живы
+# Check that all 3 processes alive
 lsof -ti:3001 && echo "weather OK" || echo "weather DEAD"
 lsof -ti:3002 && echo "reminders OK" || echo "reminders DEAD"
 lsof -ti:3003 && echo "chuck OK" || echo "chuck DEAD"
 ```
 
-### Проверка данных
+### Check Data
 
 ```bash
-# Посмотреть историю чата
+# View chat history
 cat chat_history/<chatId>_history.json | jq .
 
-# Посмотреть настройки чата
+# View chat settings
 cat chat_settings/<chatId>_settings.json | jq .
 
-# Посмотреть напоминания
+# View reminders
 cat mcp-reminders-server/storage/<chatId>.json | jq .
 
-# Посмотреть embeddings
+# View embeddings
 ls -lh embeddings_store/
 cat embeddings_store/readme.embeddings.json | jq '.embeddings | length'
 ```
 
-### Очистка для повторного теста
+### Clean for Repeat Test
 
 ```bash
-# Удалить все данные
+# Delete all data
 rm -rf chat_history/ chat_settings/
 rm -rf mcp-reminders-server/storage/
 rm -rf embeddings_store/
 
-# Убить все MCP процессы
+# Kill all MCP processes
 lsof -ti:3001 | xargs kill -9 2>/dev/null
 lsof -ti:3002 | xargs kill -9 2>/dev/null
 lsof -ti:3003 | xargs kill -9 2>/dev/null
@@ -1789,238 +1789,236 @@ lsof -ti:3003 | xargs kill -9 2>/dev/null
 
 ---
 
-# История разработки
+# Development History
 
-## Хронология развития
+## Development Timeline
 
-### День 1-10: Базовая разработка (январь 2026)
+### Day 1-10: Basic Development (January 2026)
 
-**Создание основы:**
-- Инициализация проекта на Kotlin
-- Интеграция с Telegram API
-- Базовый HTTP клиент для GigaChat
-- Управление историей чатов
-- Автоматическая суммаризация (20+ сообщений)
+**Creating foundation:**
+- Project initialization on Kotlin
+- Telegram API integration
+- Basic HTTP client for GigaChat
+- Chat history management
+- Automatic summarization (20+ messages)
 
-**Ключевые решения:**
-- Clean Architecture с разделением на слои
-- Thread-safe управление токеном GigaChat через Mutex
+**Key decisions:**
+- Clean Architecture with layer separation
+- Thread-safe GigaChat token management via Mutex
 - Graceful shutdown
-- Health Check сервер на порту 12222
+- Health Check server on port 12222
 
-### День 11-13: MCP интеграция (27-28 января 2026)
+### Day 11-13: MCP Integration (January 27-28, 2026)
 
-**Этап 1 - HTTP MCP:**
-- Создание HttpMcpService для Node.js серверов
-- Реализация Chuck Norris MCP сервера (тестовый)
-- Интеграция с GigaChat function calling
-- ToolCallHandler для обработки вызовов
+**Stage 1 - HTTP MCP:**
+- HttpMcpService creation for Node.js servers
+- Chuck Norris MCP server implementation (test)
+- GigaChat function calling integration
+- ToolCallHandler for call processing
 
-**Проблемы:**
-- ❌ Invalid function result json string - GigaChat требовал JSON вместо текста
-- ✅ Решено: обертывание результатов в `{"result": "..."}`
+**Problems:**
+- ❌ Invalid function result json string - GigaChat required JSON instead of text
+- ✅ Solved: wrapping results in `{"result": "..."}`
 
-**Этап 2 - Reminders MCP:**
-- Замена Chuck Norris на Reminders MCP (продуктовый)
-- Создание MCP Weather сервера
-- Добавление Reminders MCP сервера (3 инструмента)
-- Восстановление Chuck MCP (для утренних шуток)
+**Stage 2 - Reminders MCP:**
+- Chuck Norris replacement with Reminders MCP (production)
+- MCP Weather server creation
+- Reminders MCP server addition (3 tools)
+- Chuck MCP restoration (for morning jokes)
 
-**Результат:** 3 HTTP MCP сервера на портах 3001-3003
+**Result:** 3 HTTP MCP servers on ports 3001-3003
 
-### День 14: Stdio MCP + Docker (28 января 2026)
+### Day 14: Stdio MCP + Docker (January 28, 2026)
 
-**Docker MCP сервер:**
-- Интеграция StdioMcpService для Python серверов
-- Установка mcp-server-docker через pipx
-- 7 Docker инструментов (compose, ps, images, logs, etc.)
+**Docker MCP server:**
+- StdioMcpService integration for Python servers
+- mcp-server-docker installation via pipx
+- 7 Docker tools (compose, ps, images, logs, etc.)
 
-**Особенности:**
-- JSON-RPC over stdin/stdout протокол
-- Требует Docker Desktop
+**Features:**
+- JSON-RPC over stdin/stdout protocol
+- Requires Docker Desktop
 - Python 3.12+ requirement
 
-**Итого:** 12 MCP инструментов (5 HTTP + 7 Stdio)
+**Total:** 12 MCP tools (5 HTTP + 7 Stdio)
 
-### День 15-16: Система напоминаний (28-29 января 2026)
+### Day 15-16: Reminder System (January 28-29, 2026)
 
 **ReminderScheduler:**
-- Фоновый планировщик с ежеминутной проверкой
-- ChatSettingsManager для персистентного хранения
-- Автоматическая отправка утренних напоминаний
-- Интеграция с погодой и шутками
+- Background scheduler with per-minute check
+- ChatSettingsManager for persistent storage
+- Automatic morning reminder delivery
+- Weather and jokes integration
 
-**Проблема:**
-- ❌ Неправильное вычисление дат ("сегодня" = вчера)
-- ✅ Решено: автоматическая инъекция текущей даты/времени в системный промпт
+**Problem:**
+- ❌ Incorrect date calculation ("today" = yesterday)
+- ✅ Solved: automatic current date/time injection in system prompt
 
-**Миграция температуры:**
-- Из памяти (MutableMap) → в ChatSettings
-- Персистентность между перезапусками
+**Temperature migration:**
+- From memory (MutableMap) → to ChatSettings
+- Persistence between restarts
 
-### День 17: RAG система (3 февраля 2026)
+### Day 17: RAG System (February 3, 2026)
 
-**Базовая RAG:**
-- RagService с векторным поиском
-- EmbeddingService для Ollama nomic-embed-text
-- TextChunker и MarkdownPreprocessor
-- /createEmbeddings и /testRag команды
+**Basic RAG:**
+- RagService with vector search
+- EmbeddingService for Ollama nomic-embed-text
+- TextChunker and MarkdownPreprocessor
+- /createEmbeddings and /testRag commands
 
-**Особенности:**
-- 768-мерные векторы (nomic-embed-text)
-- Косинусное сходство для поиска
-- Чанкинг по 200 символов с перекрытием 50
-- Хранение в `embeddings_store/`
+**Features:**
+- 768-dimensional vectors (nomic-embed-text)
+- Cosine similarity for search
+- 200 character chunking with 50 overlap
+- Storage in `embeddings_store/`
 
-**Результат:** Полностью локальная RAG система без внешних API
+**Result:** Fully local RAG system without external APIs
 
-### День 18: RAG Reranker + фильтр (4 февраля 2026)
+### Day 18: RAG Reranker + Filter (February 4, 2026)
 
-**Проблема:** Векторный поиск возвращал топ-5 чанков, но часть были нерелевантны.
+**Problem:** Vector search returned top-5 chunks, but some were irrelevant.
 
-**Решение:**
-- Двухэтапная фильтрация: векторный поиск → порог релевантности
-- RagSearchResult data class с детальной статистикой
-- `/compareRag` для сравнения 3 подходов
-- `/setThreshold` для настройки порога
+**Solution:**
+- Two-stage filtering: vector search → relevance threshold
+- RagSearchResult data class with detailed statistics
+- `/compareRag` for 3 approach comparison
+- `/setThreshold` for threshold configuration
 
-**Расширение ChatSettings:**
+**ChatSettings extension:**
 ```kotlin
 val ragRelevanceThreshold: Float = 0.5F
 val ragEnabled: Boolean = true
 val ragTopK: Int = 5
 ```
 
-**Метрики:**
-- Фильтрация сокращает шум на 20-30%
-- Накладные расходы < 10ms
-- Улучшение качества ответов на 15-25%
+**Metrics:**
+- Filtering reduces noise by 20-30%
+- Overhead < 10ms
+- Answer quality improvement 15-25%
 
-**Документация:** RAG_RERANKER.md (680 строк)
+## Project Statistics
 
-## Статистика проекта
+### Codebase Size
 
-### Размер кодовой базы
+**Kotlin code:**
+- Domain layer: ~800 lines
+- Infrastructure layer: ~1500 lines
+- Main.kt: ~200 lines
+- Models: ~300 lines
+- **Total:** ~2800 lines of Kotlin code
 
-**Kotlin код:**
-- Domain layer: ~800 строк
-- Infrastructure layer: ~1500 строк
-- Main.kt: ~200 строк
-- Models: ~300 строк
-- **Итого:** ~2800 строк Kotlin кода
+**Node.js MCP servers:**
+- mcp-weather-server: ~150 lines
+- mcp-reminders-server: ~250 lines
+- mcp-chuck-server: ~100 lines
+- **Total:** ~500 lines of JavaScript
 
-**Node.js MCP серверы:**
-- mcp-weather-server: ~150 строк
-- mcp-reminders-server: ~250 строк
-- mcp-chuck-server: ~100 строк
-- **Итого:** ~500 строк JavaScript
+**Documentation:**
+- 13 MD files
+- ~5000 lines of documentation
 
-**Документация:**
-- 13 MD файлов
-- ~5000 строк документации
+### Key Metrics
 
-### Ключевые метрики
+**Components:**
+- 12 MCP tools (5 HTTP + 7 Stdio)
+- 3 AI models (GigaChat, llama3.2:1b, nomic-embed-text)
+- 15+ Telegram commands
+- 2 MCP protocols (HTTP, Stdio)
 
-**Компоненты:**
-- 12 MCP инструментов (5 HTTP + 7 Stdio)
-- 3 AI модели (GigaChat, llama3.2:1b, nomic-embed-text)
-- 15+ команд Telegram
-- 2 протокола MCP (HTTP, Stdio)
-
-**Хранилище:**
-- JSON-based персистентность
-- 4 типа данных (история, настройки, embeddings, напоминания)
-- Thread-safe операции
+**Storage:**
+- JSON-based persistence
+- 4 data types (history, settings, embeddings, reminders)
+- Thread-safe operations
 
 **Performance:**
 - Health check: instant
-- Векторный поиск: 1-2 сек
-- RAG генерация: 5-10 сек
-- MCP tool calling: 2-5 сек
+- Vector search: 1-2 sec
+- RAG generation: 5-10 sec
+- MCP tool calling: 2-5 sec
 
-## Архитектурные решения
+## Architectural Decisions
 
 ### 1. Clean Architecture
-- Domain слой независим от инфраструктуры
-- Легко тестируемый и расширяемый
-- Четкое разделение ответственности
+- Domain layer independent from infrastructure
+- Easy to test and extend
+- Clear separation of responsibilities
 
 ### 2. Dual MCP Protocol
-- HTTP для Node.js серверов (проще разработка)
-- Stdio для Python серверов (стандарт MCP)
-- Унифицированный ToolCallHandler
+- HTTP for Node.js servers (easier development)
+- Stdio for Python servers (MCP standard)
+- Unified ToolCallHandler
 
-### 3. Персистентное хранилище
-- JSON файлы вместо БД (простота)
-- Thread-safe с Mutex
-- Автоматическое создание директорий
+### 3. Persistent Storage
+- JSON files instead of DB (simplicity)
+- Thread-safe with Mutex
+- Automatic directory creation
 
-### 4. Локальная RAG
-- Ollama вместо платных API
-- Полный контроль над данными
-- Нет зависимости от внешних сервисов
+### 4. Local RAG
+- Ollama instead of paid APIs
+- Full data control
+- No dependency on external services
 
-### 5. Graceful degradation
-- Бот работает без MCP
-- Бот работает без RAG
-- Автоматическое восстановление при сбоях
+### 5. Graceful Degradation
+- Bot works without MCP
+- Bot works without RAG
+- Automatic recovery on failures
 
-## Известные ограничения
+## Known Limitations
 
-1. **SSL verification disabled** - для GigaChat из-за проблем с сертификатом
-2. **Response truncation** - 3800 символов (лимит Telegram)
-3. **Tool calling limit** - максимум 5 итераций
-4. **Single document RAG** - только readme.md
-5. **Fixed chunk size** - 200 символов (может разрезать предложения)
-6. **Small LLM** - llama3.2:1b может пропускать детали
+1. **SSL verification disabled** - for GigaChat due to certificate issues
+2. **Response truncation** - 3800 characters (Telegram limit)
+3. **Tool calling limit** - maximum 5 iterations
+4. **Single document RAG** - only readme.md
+5. **Fixed chunk size** - 200 characters (may cut sentences)
+6. **Small LLM** - llama3.2:1b may miss details
 
-## Будущие направления
+## Future Directions
 
-### Краткосрочные улучшения
-- [ ] Unit и Integration тесты
-- [ ] REST API интерфейс параллельно с Telegram
-- [ ] Metrics и мониторинг (Prometheus)
-- [ ] Docker контейнеризация
+### Short-term Improvements
+- [ ] Unit and Integration tests
+- [ ] REST API interface parallel to Telegram
+- [ ] Metrics and monitoring (Prometheus)
+- [ ] Docker containerization
 - [ ] CI/CD pipeline
 
-### Среднесрочные улучшения
+### Medium-term Improvements
 - [ ] LLM-based RAG reranker
-- [ ] Адаптивный порог релевантности
-- [ ] Гибридный поиск (векторный + BM25)
-- [ ] Многофайловый RAG
-- [ ] Повторяющиеся напоминания
+- [ ] Adaptive threshold (auto-tune by relevance distribution)
+- [ ] Hybrid search (vector + BM25)
+- [ ] Multi-file RAG
+- [ ] Recurring reminders
 
-### Долгосрочные улучшения
-- [ ] Графовая RAG (связи между чанками)
-- [ ] Streaming ответов с промежуточными результатами
-- [ ] Параллельное выполнение независимых tool calls
-- [ ] Пользовательские фильтры инструментов
-- [ ] UI для управления доступными инструментами
-
----
-
-# Заключение
-
-TeleGaGa - это полнофункциональный Telegram бот с передовыми технологиями:
-
-✅ **MCP интеграция** - 12 внешних инструментов через 2 протокола
-✅ **RAG система** - локальный векторный поиск с фильтрацией релевантности
-✅ **Система напоминаний** - автоматические утренние сообщения с погодой и шутками
-✅ **Clean Architecture** - понятная структура, легко расширяемая
-✅ **Локальные LLM** - полный контроль через Ollama
-
-**Технологии:** Kotlin, GigaChat, Ollama, MCP (HTTP + Stdio), RAG, Telegram API
-
-**Разработка:** 18 дней (27 января - 4 февраля 2026)
-
-**Документация:** 13 MD файлов, 5000+ строк
-
-**Код:** ~2800 строк Kotlin, ~500 строк JavaScript
-
-**Статус:** Готов к продакшену ✅
+### Long-term Improvements
+- [ ] Graph RAG (connections between chunks)
+- [ ] Streaming responses with intermediate results
+- [ ] Parallel execution of independent tool calls
+- [ ] Custom tool filters
+- [ ] UI for managing available tools
 
 ---
 
-**Версия документации:** 1.0
-**Дата последнего обновления:** 04 февраля 2026
-**Автор:** TeleGaGa Development Team
+# Conclusion
+
+TeleGaGa is a full-featured Telegram bot with cutting-edge technologies:
+
+✅ **MCP integration** - 12 external tools via 2 protocols
+✅ **RAG system** - local vector search with relevance filtering
+✅ **Reminder system** - automatic morning messages with weather and jokes
+✅ **Clean Architecture** - clear structure, easy to extend
+✅ **Local LLM** - full control via Ollama
+
+**Technologies:** Kotlin, GigaChat, Ollama, MCP (HTTP + Stdio), RAG, Telegram API
+
+**Development:** 18 days (January 27 - February 4, 2026)
+
+**Documentation:** 13 MD files, 5000+ lines
+
+**Code:** ~2800 lines Kotlin, ~500 lines JavaScript
+
+**Status:** Production ready ✅
+
+---
+
+**Documentation version:** 1.0
+**Last updated:** February 04, 2026
+**Author:** TeleGaGa Development Team

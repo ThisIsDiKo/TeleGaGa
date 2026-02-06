@@ -135,22 +135,81 @@ class RagService(
     }
 
     /**
-     * Форматирует найденные чанки в контекст для LLM
+     * Formats found chunks into context for LLM
      *
-     * @param chunks список троек (текст, релевантность, индекс)
-     * @return отформатированная строка с контекстом
+     * @param chunks list of triples (text, relevance, index)
+     * @return formatted context string
      */
     fun formatContext(chunks: List<Triple<String, Float, Int>>): String {
         return buildString {
-            appendLine("=== РЕЛЕВАНТНАЯ ИНФОРМАЦИЯ ИЗ ДОКУМЕНТАЦИИ ===\n")
+            appendLine("=== RELEVANT INFORMATION FROM DOCUMENTATION ===\n")
 
             chunks.forEachIndexed { i, (text, relevance, index) ->
-                appendLine("--- Фрагмент ${i + 1} (релевантность: %.2f%%) ---".format(relevance * 100))
+                appendLine("--- Fragment ${i + 1} (relevance: %.2f%%) ---".format(relevance * 100))
                 appendLine(text)
                 appendLine()
             }
 
-            appendLine("=== КОНЕЦ ДОКУМЕНТАЦИИ ===")
+            appendLine("=== END OF DOCUMENTATION ===")
+        }
+    }
+
+    /**
+     * Formats found chunks into context for LLM with source citations
+     *
+     * @param chunks list of triples (text, relevance, index)
+     * @param fileName file name to load full metadata
+     * @return formatted string with context and citations
+     */
+    fun formatContextWithCitations(
+        chunks: List<Triple<String, Float, Int>>,
+        fileName: String = "readme"
+    ): String {
+        // Load embeddings to get metadata
+        val embeddingsFile = File(storageDir, "$fileName.embeddings.json")
+
+        if (!embeddingsFile.exists()) {
+            // Fallback to regular format without citations
+            return formatContext(chunks)
+        }
+
+        val embeddingsDoc = json.decodeFromString<EmbeddingsDocument>(
+            embeddingsFile.readText()
+        )
+
+        return buildString {
+            appendLine("=== DOCUMENTATION FOR ANSWER ===")
+            appendLine()
+            appendLine("IMPORTANT:")
+            appendLine("- These fragments are relevant to the question")
+            appendLine("- MUST use information from them")
+            appendLine("- Each fact MUST have a citation in square brackets with quoted text")
+            appendLine()
+
+            chunks.forEachIndexed { i, (_, relevance, index) ->
+                // Find corresponding record with metadata
+                val record = embeddingsDoc.embeddings.find { it.index == index }
+
+                if (record != null) {
+                    appendLine("--- Fragment ${i + 1} ---")
+                    appendLine("Source: ${record.sourceFile}, lines ${record.startLine}-${record.endLine}")
+                    appendLine("Relevance: %.1f%%".format(relevance * 100))
+                    appendLine("Text to quote:")
+                    appendLine(record.text)
+                    appendLine()
+                } else {
+                    // Fallback if metadata not found
+                    appendLine("--- Fragment ${i + 1} ---")
+                    appendLine("Relevance: %.1f%%".format(relevance * 100))
+                    appendLine()
+                }
+            }
+
+            appendLine("=== INSTRUCTION ===")
+            appendLine("1. USE information from fragments above")
+            appendLine("2. ADD citation in square brackets [quoted text] after each fact")
+            appendLine("3. DO NOT write 'information not found' if it exists above")
+            appendLine("4. Answer in English language")
         }
     }
 

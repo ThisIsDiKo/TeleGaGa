@@ -1,9 +1,20 @@
 package ru.dikoresearch.infrastructure.embeddings
 
 import ru.dikoresearch.domain.MarkdownPreprocessor
+import ru.dikoresearch.domain.TextChunk
 import ru.dikoresearch.domain.TextChunker
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
+
+/**
+ * Результат генерации embeddings с метаданными
+ */
+data class EmbeddingWithMetadata(
+    val text: String,
+    val embedding: List<Float>,
+    val startLine: Int,
+    val endLine: Int
+)
 
 /**
  * Сервис для генерации embeddings с батчингом
@@ -120,6 +131,68 @@ class EmbeddingService(
             }
 
             results
+        }
+    }
+
+    /**
+     * Генерирует embeddings для Markdown документа с метаданными о строках
+     * @param markdownText исходный Markdown текст
+     * @param sourceFile имя исходного файла
+     * @return Список EmbeddingWithMetadata с информацией о строках
+     */
+    suspend fun generateEmbeddingsWithMetadata(
+        markdownText: String,
+        sourceFile: String = "readme.md"
+    ): List<EmbeddingWithMetadata> {
+        println("📄 Начинаю предобработку Markdown с метаданными...")
+
+        // Предобработка: удаление код-блоков и разбиение на абзацы
+        val preprocessedText = markdownPreprocessor.preprocess(markdownText)
+
+        println("✂️ Предобработка завершена:")
+        println("   Исходный размер: ${markdownText.length} символов")
+        println("   После обработки: ${preprocessedText.length} символов")
+
+        // Разбиваем на чанки с метаданными
+        val chunks: List<TextChunk> = textChunker.chunkWithMetadata(preprocessedText)
+
+        println("📦 Создано ${chunks.size} чанков с метаданными")
+
+        // Генерируем embeddings
+        val texts = chunks.map { it.text }
+
+        val embeddings = if (useOllama) {
+            if (ollamaClient == null) {
+                throw IllegalStateException("Ollama client не инициализирован")
+            }
+            println("🦙 Используется Ollama для генерации embeddings")
+            ollamaClient.embeddings(texts)
+        } else {
+            if (gigaChatClient == null) {
+                throw IllegalStateException("GigaChat client не инициализирован")
+            }
+            println("🤖 Используется GigaChat для генерации embeddings")
+
+            val results = mutableListOf<Pair<String, List<Float>>>()
+            texts.chunked(batchSize).forEach { batch ->
+                val response = gigaChatClient.embeddings(batch)
+                response.data.forEach { embedding ->
+                    val chunkText = batch[embedding.index]
+                    results.add(chunkText to embedding.embedding)
+                }
+            }
+            results
+        }
+
+        // Объединяем embeddings с метаданными
+        return embeddings.mapIndexed { index, (text, embedding) ->
+            val chunk = chunks[index]
+            EmbeddingWithMetadata(
+                text = text,
+                embedding = embedding,
+                startLine = chunk.startLine,
+                endLine = chunk.endLine
+            )
         }
     }
 }

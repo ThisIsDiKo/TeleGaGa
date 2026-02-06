@@ -25,7 +25,7 @@ class OllamaClient(
     ): OllamaChatResponse {
 
         val requestBody = OllamaChatRequest(
-            model = "qwen3:4b",
+            model = "llama3.2:3b",
             messages = messages,
             stream = false
         )

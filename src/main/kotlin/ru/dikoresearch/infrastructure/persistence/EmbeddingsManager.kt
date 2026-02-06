@@ -3,6 +3,7 @@ package ru.dikoresearch.infrastructure.persistence
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import ru.dikoresearch.infrastructure.embeddings.EmbeddingWithMetadata
 import java.io.File
 
 /**
@@ -12,7 +13,10 @@ import java.io.File
 data class EmbeddingRecord(
     val text: String,
     val embedding: List<Float>,
-    val index: Int
+    val index: Int,
+    val startLine: Int = 0,  // Номер начальной строки в исходном документе
+    val endLine: Int = 0,    // Номер конечной строки в исходном документе
+    val sourceFile: String = "readme.md"  // Имя исходного файла
 )
 
 @Serializable
@@ -52,6 +56,43 @@ class EmbeddingsManager {
                 text = text,
                 embedding = embedding,
                 index = index
+            )
+        }
+
+        val document = EmbeddingsDocument(
+            fileName = fileName,
+            totalChunks = embeddings.size,
+            chunkSize = chunkSize,
+            embeddings = records
+        )
+
+        val outputFile = File(storageDir, "${fileName}.embeddings.json")
+        val jsonContent = json.encodeToString(document)
+        outputFile.writeText(jsonContent)
+
+        return outputFile.absolutePath
+    }
+
+    /**
+     * Сохраняет embeddings с метаданными источников в JSON файл
+     * @param fileName Имя исходного файла
+     * @param embeddings Список EmbeddingWithMetadata
+     * @param chunkSize Размер чанка
+     * @return Путь к сохраненному файлу
+     */
+    fun saveEmbeddingsWithMetadata(
+        fileName: String,
+        embeddings: List<EmbeddingWithMetadata>,
+        chunkSize: Int
+    ): String {
+        val records = embeddings.mapIndexed { index, emb ->
+            EmbeddingRecord(
+                text = emb.text,
+                embedding = emb.embedding,
+                index = index,
+                startLine = emb.startLine,
+                endLine = emb.endLine,
+                sourceFile = fileName
             )
         }
 
