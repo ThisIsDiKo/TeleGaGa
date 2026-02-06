@@ -26,7 +26,8 @@ class EmbeddingService(
     private val textChunker: TextChunker,
     private val markdownPreprocessor: MarkdownPreprocessor,
     private val batchSize: Int = 15, // 10-20 чанков за запрос для GigaChat
-    private val useOllama: Boolean = true // По умолчанию используем Ollama
+    private val useOllama: Boolean = true, // По умолчанию используем Ollama
+    private val verbose: Boolean = true // Логирование (true для Telegram бота, false для CLI)
 ) {
     /**
      * Генерирует embeddings для текста с автоматическим чанкингом и батчингом
@@ -42,14 +43,14 @@ class EmbeddingService(
             if (ollamaClient == null) {
                 throw IllegalStateException("Ollama client не инициализирован")
             }
-            println("🦙 Используется Ollama для генерации embeddings")
+            if (verbose) println("🦙 Используется Ollama для генерации embeddings")
             ollamaClient.embeddings(chunks)
         } else {
             // Используем GigaChat (требует пакеты)
             if (gigaChatClient == null) {
                 throw IllegalStateException("GigaChat client не инициализирован")
             }
-            println("🤖 Используется GigaChat для генерации embeddings")
+            if (verbose) println("🤖 Используется GigaChat для генерации embeddings")
 
             // Батчим чанки для GigaChat
             val results = mutableListOf<Pair<String, List<Float>>>()
@@ -77,14 +78,14 @@ class EmbeddingService(
      * @return Список пар (текст чанка, embedding вектор)
      */
     suspend fun generateEmbeddingsForMarkdown(markdownText: String): List<Pair<String, List<Float>>> {
-        println("📄 Начинаю предобработку Markdown...")
+        if (verbose) println("📄 Начинаю предобработку Markdown...")
 
         // Предобработка: удаление код-блоков и разбиение на абзацы
         val preprocessedText = markdownPreprocessor.preprocess(markdownText)
 
-        println("✂️ Предобработка завершена:")
-        println("   Исходный размер: ${markdownText.length} символов")
-        println("   После обработки: ${preprocessedText.length} символов")
+        if (verbose) println("✂️ Предобработка завершена:")
+        if (verbose) println("   Исходный размер: ${markdownText.length} символов")
+        if (verbose) println("   После обработки: ${preprocessedText.length} символов")
 
         // Генерируем embeddings для очищенного текста
         return generateEmbeddings(preprocessedText)
@@ -98,27 +99,27 @@ class EmbeddingService(
      * @return Список пар (текст предложения, embedding вектор)
      */
     suspend fun generateEmbeddingsForMarkdownBySentences(markdownText: String): List<Pair<String, List<Float>>> {
-        println("📄 Начинаю предобработку Markdown по предложениям...")
+        if (verbose) println("📄 Начинаю предобработку Markdown по предложениям...")
 
         // Получаем список предложений без кода
         val sentences = markdownPreprocessor.splitIntoParagraphsAndSentences(markdownText)
 
-        println("✂️ Предобработка завершена:")
-        println("   Найдено предложений: ${sentences.size}")
+        if (verbose) println("✂️ Предобработка завершена:")
+        if (verbose) println("   Найдено предложений: ${sentences.size}")
 
         return if (useOllama) {
             // Используем Ollama
             if (ollamaClient == null) {
                 throw IllegalStateException("Ollama client не инициализирован")
             }
-            println("🦙 Используется Ollama для генерации embeddings по предложениям")
+            if (verbose) println("🦙 Используется Ollama для генерации embeddings по предложениям")
             ollamaClient.embeddings(sentences)
         } else {
             // Используем GigaChat
             if (gigaChatClient == null) {
                 throw IllegalStateException("GigaChat client не инициализирован")
             }
-            println("🤖 Используется GigaChat для генерации embeddings по предложениям")
+            if (verbose) println("🤖 Используется GigaChat для генерации embeddings по предложениям")
 
             val results = mutableListOf<Pair<String, List<Float>>>()
 
@@ -144,19 +145,19 @@ class EmbeddingService(
         markdownText: String,
         sourceFile: String = "readme.md"
     ): List<EmbeddingWithMetadata> {
-        println("📄 Начинаю предобработку Markdown с метаданными...")
+        if (verbose) println("📄 Начинаю предобработку Markdown с метаданными...")
 
         // Предобработка: удаление код-блоков и разбиение на абзацы
         val preprocessedText = markdownPreprocessor.preprocess(markdownText)
 
-        println("✂️ Предобработка завершена:")
-        println("   Исходный размер: ${markdownText.length} символов")
-        println("   После обработки: ${preprocessedText.length} символов")
+        if (verbose) println("✂️ Предобработка завершена:")
+        if (verbose) println("   Исходный размер: ${markdownText.length} символов")
+        if (verbose) println("   После обработки: ${preprocessedText.length} символов")
 
         // Разбиваем на чанки с метаданными
         val chunks: List<TextChunk> = textChunker.chunkWithMetadata(preprocessedText)
 
-        println("📦 Создано ${chunks.size} чанков с метаданными")
+        if (verbose) println("📦 Создано ${chunks.size} чанков с метаданными")
 
         // Генерируем embeddings
         val texts = chunks.map { it.text }
@@ -165,13 +166,13 @@ class EmbeddingService(
             if (ollamaClient == null) {
                 throw IllegalStateException("Ollama client не инициализирован")
             }
-            println("🦙 Используется Ollama для генерации embeddings")
+            if (verbose) println("🦙 Используется Ollama для генерации embeddings")
             ollamaClient.embeddings(texts)
         } else {
             if (gigaChatClient == null) {
                 throw IllegalStateException("GigaChat client не инициализирован")
             }
-            println("🤖 Используется GigaChat для генерации embeddings")
+            if (verbose) println("🤖 Используется GigaChat для генерации embeddings")
 
             val results = mutableListOf<Pair<String, List<Float>>>()
             texts.chunked(batchSize).forEach { batch ->

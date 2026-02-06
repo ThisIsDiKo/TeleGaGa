@@ -21,33 +21,39 @@ import javax.net.ssl.X509TrustManager
 import kotlin.system.exitProcess
 
 /**
- * CLI system prompt for RAG-enabled assistant with mandatory citations
+ * CLI system prompt for hybrid RAG-enabled assistant
  * Using Ollama llama3.2:3b model, English language only
+ *
+ * Supports two modes:
+ * 1. WITH DOCUMENTATION: When relevant documentation is provided, cite sources
+ * 2. WITHOUT DOCUMENTATION: Use your knowledge to answer questions
  */
 val CLI_RAG_SYSTEM_PROMPT = """
-You are an AI assistant that answers questions ONLY using the provided documentation.
-Answer in English language only.
+You are an AI assistant that helps answer questions in English.
 
-MANDATORY CITATION RULES:
+TWO MODES OF OPERATION:
 
-1. USE ONLY PROVIDED FRAGMENTS
-   - Never invent information
-   - If the answer is not in fragments, say: "The documentation does not contain information about this topic"
+MODE 1: WITH DOCUMENTATION (when fragments are provided below)
+- Use ONLY the provided documentation fragments
+- EVERY fact must have a citation: [quoted text from documentation]
+- Place exact quote in square brackets after each fact
+- If answer is not in fragments, say so
 
-2. EVERY FACT MUST HAVE A CITATIO
-   - Citation format: [quoted text from documentation]
-   - Place exact quote in square brackets after each fact
+MODE 2: WITHOUT DOCUMENTATION (when no fragments are provided)
+- Use your general knowledge to answer
+- Be helpful and informative
+- Admit when you don't know something
+- No citations needed in this mode
 
-3. FORBIDDEN ACTIONS
-   - Answer without citations
-   - Paraphrase without quoting
-
-CORRECT EXAMPLE:
-Q: What models are used?
+EXAMPLE WITH DOCUMENTATION:
 Fragment: "The system uses Ollama with llama3.2:3b model"
 Answer: The system uses Ollama with llama3.2:3b model [The system uses Ollama with llama3.2:3b model].
 
-This is a CLI - be concise and direct.
+EXAMPLE WITHOUT DOCUMENTATION:
+Question: What is machine learning?
+Answer: Machine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed.
+
+Be concise and direct.
 """.trimIndent()
 
 /**
@@ -55,34 +61,16 @@ This is a CLI - be concise and direct.
  */
 fun main(args: Array<String>) = runBlocking {
     try {
-        println("=".repeat(60))
-        println("TeleGaGa CLI Chatbot - Initializing")
-        println("=".repeat(60))
-        println()
-
         // Parse CLI arguments
         val cliArgs = parseCliArguments(args)
-        println("Configuration:")
-        println("  Model: llama3.2:3b (Ollama)")
-        println("  RAG Threshold: ${cliArgs.threshold}")
-        println("  RAG Top-K: ${cliArgs.topK}")
-        println()
 
-        // 1. Create HTTP client
-        println("[1/6] Creating HTTP client...")
+        // Create HTTP client
         val httpClient = createHttpClient()
-        println("  HTTP client created")
-        println()
 
-        // 2. Initialize Ollama client
-        println("[2/6] Initializing Ollama client...")
-        val ollamaClient = OllamaClient(httpClient = httpClient)
-        println("  Ollama client created (http://localhost:11434)")
-        println("  Model: llama3.2:3b")
-        println()
+        // Initialize Ollama client (verbose=false for clean CLI output)
+        val ollamaClient = OllamaClient(httpClient = httpClient, verbose = false)
 
-        // 3. Initialize RAG services
-        println("[3/6] Initializing RAG services...")
+        // Initialize RAG services
         val markdownPreprocessor = MarkdownPreprocessor()
         val textChunker = TextChunker(chunkSize = 300, overlap = 50)
         val embeddingService = EmbeddingService(
@@ -91,26 +79,18 @@ fun main(args: Array<String>) = runBlocking {
             textChunker = textChunker,
             markdownPreprocessor = markdownPreprocessor,
             batchSize = 15,
-            useOllama = true
+            useOllama = true,
+            verbose = false  // Silent mode for CLI
         )
         val ragService = RagService(embeddingService = embeddingService)
-        println("  RAG services initialized (Ollama nomic-embed-text)")
-        println()
 
-        // 4. Check embeddings file exists
-        println("[4/6] Checking embeddings...")
-        val embeddingsFile = File("embeddings_store/readme.embeddings.json")
-        if (!embeddingsFile.exists()) {
-            println("  ERROR: Embeddings file not found!")
-            println("  Expected: ${embeddingsFile.absolutePath}")
-            println("  Please create embeddings first using the Telegram bot's /createEmbeddings command")
-            exitProcess(1)
+        // Check if embeddings exist
+        val embeddingsDir = File("embeddings_store")
+        if (!embeddingsDir.exists() || embeddingsDir.listFiles { it.name.endsWith(".embeddings.json") }?.isEmpty() == true) {
+            println("No embeddings found. Use /createEmbeddings command to create them.")
         }
-        println("  Embeddings file found: ${embeddingsFile.absolutePath}")
-        println()
 
-        // 5. Create CLI orchestrator
-        println("[5/6] Creating CLI orchestrator...")
+        // Create CLI orchestrator
         val orchestrator = CliChatOrchestrator(
             ollamaClient = ollamaClient,
             ragService = ragService,
@@ -119,14 +99,13 @@ fun main(args: Array<String>) = runBlocking {
             ragTopK = cliArgs.topK,
             ragRelevanceThreshold = cliArgs.threshold
         )
-        println("  CLI orchestrator created")
-        println()
 
-        // 6. Create and start CLI chatbot
-        println("[6/6] Starting CLI chatbot...")
-        val chatbot = CliChatbot(orchestrator = orchestrator)
-        println("  CLI chatbot ready")
-        println()
+        // Create and start CLI chatbot
+        val chatbot = CliChatbot(
+            orchestrator = orchestrator,
+            embeddingService = embeddingService,
+            ragService = ragService
+        )
 
         // Start REPL
         chatbot.start()

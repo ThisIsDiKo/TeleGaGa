@@ -16,7 +16,8 @@ import kotlinx.serialization.json.Json
 
 class OllamaClient(
     private val httpClient: HttpClient,
-    private val baseUrl: String = "http://localhost:11434"
+    private val baseUrl: String = "http://localhost:11434",
+    private val verbose: Boolean = false
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -30,24 +31,31 @@ class OllamaClient(
             stream = false
         )
 
-        println("Request for ollama is $requestBody")
-        println("Request for ollama is ${Json { prettyPrint = true }.encodeToString(requestBody)}")
+        if (verbose) {
+            println("Request for ollama is $requestBody")
+            println("Request for ollama is ${Json { prettyPrint = true }.encodeToString(requestBody)}")
+        }
 
         val response = httpClient.post("$baseUrl/api/chat") {
             contentType(ContentType.Application.Json)
             setBody(requestBody)
         }
 
-        println("Response from ollama is $response -> ${response.bodyAsText()}")
-
         val bodyText = response.bodyAsText()
+
+        if (verbose) {
+            println("Response from ollama is $response -> $bodyText")
+        }
+
         if (!response.status.isSuccess()) {
             throw IllegalStateException("Ollama error: ${response.status}: $bodyText")
         }
 
         val parsed: OllamaChatResponse = json.decodeFromString(bodyText)
 
-        println("Parsed ollama response: $parsed")
+        if (verbose) {
+            println("Parsed ollama response: $parsed")
+        }
 
         return parsed
     }
@@ -64,7 +72,9 @@ class OllamaClient(
         texts: List<String>,
         model: String = "nomic-embed-text"
     ): List<Pair<String, List<Float>>> {
-        println("📤 Ollama embeddings запрос для ${texts.size} текстов (модель: $model)")
+        if (verbose) {
+            println("📤 Ollama embeddings запрос для ${texts.size} текстов (модель: $model)")
+        }
 
         val results = mutableListOf<Pair<String, List<Float>>>()
 
@@ -91,12 +101,14 @@ class OllamaClient(
 
             results.add(text to embeddingFloats)
 
-            if ((index + 1) % 5 == 0) {
+            if (verbose && (index + 1) % 5 == 0) {
                 println("   Обработано ${index + 1}/${texts.size} текстов")
             }
         }
 
-        println("📥 Ollama embeddings завершен (${results.size} embeddings)")
+        if (verbose) {
+            println("📥 Ollama embeddings завершен (${results.size} embeddings)")
+        }
         return results
     }
 }

@@ -22,6 +22,29 @@ data class RagSearchResult(
     val maxRelevance: Float                         // Максимальная релевантность
 )
 
+/**
+ * Чанк с информацией о файле-источнике
+ */
+data class ChunkWithSource(
+    val text: String,
+    val relevance: Float,
+    val fileName: String,
+    val startLine: Int,
+    val endLine: Int
+)
+
+/**
+ * Результат поиска по всем файлам
+ */
+data class MultiFileRagResult(
+    val chunks: List<ChunkWithSource>,
+    val originalCount: Int,
+    val filteredCount: Int,
+    val avgRelevance: Float,
+    val minRelevance: Float,
+    val maxRelevance: Float
+)
+
 class RagService(
     private val embeddingService: EmbeddingService
 ) {
@@ -46,8 +69,8 @@ class RagService(
 
         if (!embeddingsFile.exists()) {
             throw IllegalStateException(
-                "Файл embeddings не найден: ${embeddingsFile.absolutePath}\n" +
-                "Создайте embeddings командой /createEmbeddings"
+                "Embeddings file not found: ${embeddingsFile.absolutePath}\n" +
+                "Create embeddings using /createEmbeddings command"
             )
         }
 
@@ -55,14 +78,11 @@ class RagService(
             embeddingsFile.readText()
         )
 
-        println("📚 Загружено ${embeddingsDoc.totalChunks} чанков из ${embeddingsDoc.fileName}")
-
         // Генерируем embedding для вопроса
-        println("🔍 Генерация embedding для вопроса...")
         val questionEmbeddings = embeddingService.generateEmbeddings(question)
 
         if (questionEmbeddings.isEmpty()) {
-            throw IllegalStateException("Не удалось сгенерировать embedding для вопроса")
+            throw IllegalStateException("Failed to generate embedding for question")
         }
 
         val questionVector = questionEmbeddings.first().second
@@ -77,11 +97,6 @@ class RagService(
         val topResults = similarities
             .sortedByDescending { it.second }
             .take(topK)
-
-        println("✅ Найдено ${topResults.size} релевантных чанков")
-        topResults.forEachIndexed { i, (_, relevance, index) ->
-            println("   ${i + 1}. Чанк #$index: релевантность = %.4f".format(relevance))
-        }
 
         return topResults
     }
@@ -116,13 +131,6 @@ class RagService(
 
         val minRelevance = filteredChunks.minOfOrNull { it.second } ?: 0f
         val maxRelevance = filteredChunks.maxOfOrNull { it.second } ?: 0f
-
-        println("🔍 Результаты фильтрации:")
-        println("   До фильтрации: ${topCandidates.size} чанков")
-        println("   После фильтрации (≥${relevanceThreshold}): ${filteredChunks.size} чанков")
-        if (filteredChunks.isNotEmpty()) {
-            println("   Средняя релевантность: %.4f".format(avgRelevance))
-        }
 
         return RagSearchResult(
             chunks = filteredChunks,
@@ -203,6 +211,117 @@ class RagService(
                     appendLine("Relevance: %.1f%%".format(relevance * 100))
                     appendLine()
                 }
+            }
+
+            appendLine("=== INSTRUCTION ===")
+            appendLine("1. USE information from fragments above")
+            appendLine("2. ADD citation in square brackets [quoted text] after each fact")
+            appendLine("3. DO NOT write 'information not found' if it exists above")
+            appendLine("4. Answer in English language")
+        }
+    }
+
+    /**
+     * Finds relevant chunks across ALL embedding files in embeddings_store
+     *
+     * @param question user question
+     * @param topK maximum number of chunks to return
+     * @param relevanceThreshold minimum relevance threshold (0.0-1.0)
+     * @return search result with chunks from all files
+     */
+    suspend fun findRelevantChunksAcrossAllFiles(
+        question: String,
+        topK: Int = 5,
+        relevanceThreshold: Float = 0.5f
+    ): MultiFileRagResult {
+        // Get all .embeddings.json files
+        val embeddingFiles = storageDir.listFiles { file ->
+            file.name.endsWith(".embeddings.json")
+        } ?: emptyArray()
+
+        if (embeddingFiles.isEmpty()) {
+            throw IllegalStateException(
+                "No embedding files found in ${storageDir.absolutePath}\n" +
+                "Create embeddings using /createEmbeddings command"
+            )
+        }
+
+        // Generate embedding for question once
+        val questionEmbeddings = embeddingService.generateEmbeddings(question)
+        if (questionEmbeddings.isEmpty()) {
+            throw IllegalStateException("Failed to generate embedding for question")
+        }
+        val questionVector = questionEmbeddings.first().second
+
+        // Collect all chunks from all files with their sources
+        val allChunks = mutableListOf<ChunkWithSource>()
+
+        embeddingFiles.forEach { file ->
+            val embeddingsDoc = json.decodeFromString<EmbeddingsDocument>(
+                file.readText()
+            )
+
+            embeddingsDoc.embeddings.forEach { record ->
+                val similarity = cosineSimilarity(questionVector, record.embedding)
+
+                allChunks.add(
+                    ChunkWithSource(
+                        text = record.text,
+                        relevance = similarity,
+                        fileName = record.sourceFile,
+                        startLine = record.startLine,
+                        endLine = record.endLine
+                    )
+                )
+            }
+        }
+
+        // Sort by relevance and take top-K
+        val topCandidates = allChunks
+            .sortedByDescending { it.relevance }
+            .take(topK)
+
+        // Filter by threshold
+        val filteredChunks = topCandidates.filter { it.relevance >= relevanceThreshold }
+
+        // Calculate stats
+        val avgRelevance = if (filteredChunks.isNotEmpty()) {
+            filteredChunks.map { it.relevance }.average().toFloat()
+        } else 0f
+
+        val minRelevance = filteredChunks.minOfOrNull { it.relevance } ?: 0f
+        val maxRelevance = filteredChunks.maxOfOrNull { it.relevance } ?: 0f
+
+        return MultiFileRagResult(
+            chunks = filteredChunks,
+            originalCount = topCandidates.size,
+            filteredCount = filteredChunks.size,
+            avgRelevance = avgRelevance,
+            minRelevance = minRelevance,
+            maxRelevance = maxRelevance
+        )
+    }
+
+    /**
+     * Formats chunks from multiple files into context for LLM with citations
+     */
+    fun formatContextForMultipleFiles(chunks: List<ChunkWithSource>): String {
+        return buildString {
+            appendLine("=== DOCUMENTATION FOR ANSWER ===")
+            appendLine()
+            appendLine("IMPORTANT:")
+            appendLine("- These fragments are relevant to the question")
+            appendLine("- MUST use information from them")
+            appendLine("- Each fact MUST have a citation in square brackets with quoted text")
+            appendLine()
+
+            chunks.forEachIndexed { i, chunk ->
+                appendLine("--- Fragment ${i + 1} ---")
+                appendLine("Source: ${chunk.fileName}, lines ${chunk.startLine}-${chunk.endLine}")
+                appendLine("Relevance: %.1f%%".format(chunk.relevance * 100))
+                appendLine("Text to quote:")
+                appendLine(chunk.text)
+                appendLine()
             }
 
             appendLine("=== INSTRUCTION ===")

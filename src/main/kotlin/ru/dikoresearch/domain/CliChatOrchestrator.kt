@@ -15,9 +15,10 @@ class CliChatOrchestrator(
     private val systemPrompt: String,
     private val ragEnabled: Boolean = true,
     private val ragTopK: Int = 5,
-    private val ragRelevanceThreshold: Float = 0.5f
+    private var ragRelevanceThreshold: Float = 0.5f
 ) {
     private val conversationHistory = mutableListOf<GigaChatMessage>()
+    private var useRagForCurrentQuery: Boolean = false
 
     init {
         // Add system prompt to conversation history
@@ -39,62 +40,52 @@ class CliChatOrchestrator(
         val sources = mutableListOf<Source>()
         var ragStats: RagStats? = null
         var finalQuery = userQuery
+        useRagForCurrentQuery = false
 
-        // 1. RAG: Search for relevant chunks if enabled
+        // 1. RAG: Search across all embedding files
         if (ragEnabled) {
             try {
-                val ragResult = ragService.findRelevantChunksWithFilter(
+                val ragResult = ragService.findRelevantChunksAcrossAllFiles(
                     question = userQuery,
-                    fileName = "readme",
                     topK = ragTopK,
-                    relevanceThreshold = ragRelevanceThreshold
+                    relevanceThreshold = 0.0f  // Get all top-K, we'll filter by threshold ourselves
                 )
 
                 ragStats = RagStats(
-                    chunksFound = ragResult.filteredCount,
+                    chunksFound = ragResult.originalCount,
                     originalCount = ragResult.originalCount,
                     avgRelevance = ragResult.avgRelevance,
                     minRelevance = ragResult.minRelevance,
                     maxRelevance = ragResult.maxRelevance
                 )
 
-                // Extract sources from RAG results
-                if (ragResult.filteredCount > 0) {
-                    // Load embeddings document to get metadata
-                    val embeddingsFile = java.io.File("embeddings_store/readme.embeddings.json")
-                    if (embeddingsFile.exists()) {
-                        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                        val embeddingsDoc = json.decodeFromString<ru.dikoresearch.infrastructure.persistence.EmbeddingsDocument>(
-                            embeddingsFile.readText()
-                        )
+                // Check if max relevance meets our threshold
+                // Only use RAG if we have high-confidence matches
+                if (ragResult.maxRelevance >= ragRelevanceThreshold && ragResult.chunks.isNotEmpty()) {
+                    useRagForCurrentQuery = true
 
-                        // Extract sources from chunks
-                        ragResult.chunks.forEach { (_, relevance, index) ->
-                            val record = embeddingsDoc.embeddings.find { it.index == index }
-                            if (record != null) {
-                                sources.add(
-                                    Source(
-                                        file = record.sourceFile,
-                                        startLine = record.startLine,
-                                        endLine = record.endLine,
-                                        relevance = relevance
-                                    )
-                                )
-                            }
-                        }
+                    // Filter chunks by our threshold
+                    val filteredChunks = ragResult.chunks.filter { it.relevance >= ragRelevanceThreshold }
+
+                    filteredChunks.forEach { chunk ->
+                        sources.add(
+                            Source(
+                                file = chunk.fileName,
+                                startLine = chunk.startLine,
+                                endLine = chunk.endLine,
+                                relevance = chunk.relevance
+                            )
+                        )
                     }
 
                     // Format context with citations
-                    val context = ragService.formatContextWithCitations(
-                        chunks = ragResult.chunks,
-                        fileName = "readme"
-                    )
+                    val context = ragService.formatContextForMultipleFiles(filteredChunks)
 
                     // Prepend RAG context to user query
                     finalQuery = "$context\n\n=== USER QUESTION ===\n$userQuery"
                 }
+                // If max relevance < threshold, don't use RAG - let LLM think on its own
             } catch (e: Exception) {
-                println("Warning: RAG search failed: ${e.message}")
                 // Continue without RAG context
             }
         }
@@ -132,7 +123,8 @@ class CliChatOrchestrator(
                 completionTokens = llmResponse.eval_count.toInt(),
                 totalTokens = (llmResponse.prompt_eval_count + llmResponse.eval_count).toInt()
             ),
-            ragStats = ragStats
+            ragStats = ragStats,
+            usedRag = useRagForCurrentQuery
         )
     }
 
@@ -162,6 +154,29 @@ class CliChatOrchestrator(
     fun getHistory(): List<GigaChatMessage> {
         return conversationHistory.toList()
     }
+
+    /**
+     * Set RAG relevance threshold
+     * @param threshold minimum relevance score (0.0-1.0)
+     */
+    fun setRelevanceThreshold(threshold: Float) {
+        require(threshold in 0.0f..1.0f) { "Threshold must be between 0.0 and 1.0" }
+        ragRelevanceThreshold = threshold
+    }
+
+    /**
+     * Get current RAG relevance threshold
+     */
+    fun getRelevanceThreshold(): Float {
+        return ragRelevanceThreshold
+    }
+
+    /**
+     * Check if RAG was used for the last query
+     */
+    fun wasRagUsed(): Boolean {
+        return useRagForCurrentQuery
+    }
 }
 
 /**
@@ -171,7 +186,8 @@ data class CliChatResponse(
     val answer: String,
     val sources: List<Source>,
     val tokenUsage: OllamaTokenUsage,
-    val ragStats: RagStats?
+    val ragStats: RagStats?,
+    val usedRag: Boolean
 )
 
 /**
