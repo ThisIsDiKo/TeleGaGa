@@ -34,6 +34,15 @@ application {
     mainClass.set("ru.dikoresearch.MainKt")
 }
 
+// Task for running CLI chatbot
+tasks.register<JavaExec>("runCli") {
+    group = "application"
+    description = "Run CLI chatbot with RAG"
+    mainClass.set("ru.dikoresearch.MainCliKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
+
 kotlin {
     jvmToolchain(17)
 }
