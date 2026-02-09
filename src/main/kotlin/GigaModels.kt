@@ -14,9 +14,10 @@ data class AIChallengeResponse(
 @Serializable
 data class GigaChatMessage(
     val role: String,
-    val content: String,
+    val content: String = "",
     @SerialName("function_call")
-    val functionCall: GigaChatFunctionCall? = null
+    val functionCall: GigaChatFunctionCall? = null,
+    val name: String? = null  // For function role
 )
 
 @Serializable

@@ -195,16 +195,51 @@ fun main() {
         }
         println("   ✅ RAG сервисы инициализированы (Ollama embeddings + Markdown preprocessor)\n")
 
-        // 7. Создание Domain Layer
-        println("7. Создание ChatOrchestrator...")
+        // 7. Инициализация Git MCP Service
+        println("7. Инициализация Git MCP Service...")
+
+        // Find uvx in PATH or user's .local/bin
+        val uvxPath = System.getenv("PATH")?.split(":")
+            ?.map { "$it/uvx" }
+            ?.firstOrNull { File(it).exists() }
+            ?: "${System.getProperty("user.home")}/.local/bin/uvx"
+
+        println("   Using uvx at: $uvxPath")
+
+        val gitMcpService = try {
+            // Use absolute path to ensure git MCP works with correct repository
+            val projectPath = System.getProperty("user.dir")
+            println("   Project path: $projectPath")
+
+            val gitMcpConfig = listOf(
+                ru.dikoresearch.infrastructure.mcp.StdioMcpService.ServerConfig(
+                    name = "git",
+                    command = uvxPath,
+                    args = listOf("mcp-server-git", "--repository", projectPath)
+                )
+            )
+            val service = ru.dikoresearch.infrastructure.mcp.StdioMcpService(gitMcpConfig)
+            runBlocking { service.initialize() }
+            println("   ✅ Git MCP Service инициализирован для репозитория: $projectPath")
+            service
+        } catch (e: Exception) {
+            println("   ⚠️ Git MCP Service недоступен (будет работать без git tools): ${e.message}")
+            e.printStackTrace()
+            // Create empty service
+            ru.dikoresearch.infrastructure.mcp.StdioMcpService(emptyList())
+        }
+        println()
+
+        // 8. Создание Domain Layer
+        println("8. Создание ChatOrchestrator...")
         val chatOrchestrator = ChatOrchestrator(
             gigaClient = gigaClient,
             historyManager = historyManager
         )
         println("   ChatOrchestrator создан\n")
 
-        // 8. Создание Telegram Bot Service
-        println("8. Инициализация Telegram Bot Service...")
+        // 9. Создание Telegram Bot Service
+        println("9. Инициализация Telegram Bot Service...")
         botService = TelegramBotService(
             telegramToken = config.telegramToken,
             chatOrchestrator = chatOrchestrator,
@@ -213,6 +248,7 @@ fun main() {
             embeddingsManager = embeddingsManager,
             textChunker = textChunker,
             ollamaClient = ollamaClient,
+            gitMcpService = gitMcpService,
             applicationScope = applicationScope,
             defaultSystemRole = AssistantRole,
             defaultTemperature = 0.87F,
@@ -220,21 +256,37 @@ fun main() {
         )
         println("   TelegramBotService создан\n")
 
-        // 9. Запуск Health Check сервера
-        println("9. Запуск Health Check сервера...")
+        // 10. Запуск Health Check сервера
+        println("10. Запуск Health Check сервера...")
         startHealthCheckServer()
         println("   Health Check сервер запущен на http://localhost:12222\n")
 
-        // 10. Запуск Telegram бота
-        println("10. Запуск Telegram бота...")
+        // 11. Запуск Telegram бота
+        println("11. Запуск Telegram бота...")
         botService.start()
         println("   TelegramBot запущен\n")
 
         println("=== TeleGaGa бот с RAG успешно запущен ===")
-        println("Для остановки нажмите Enter\n")
+        println("Для остановки нажмите Enter (или Ctrl+C)\n")
+
+        // Добавляем shutdown hook для корректного завершения при Ctrl+C
+        Runtime.getRuntime().addShutdownHook(Thread {
+            println("\n(Получен сигнал завершения)")
+        })
 
         // Блокируем main поток до получения Enter
-        readLine()
+        val input = readLine()
+        if (input == null) {
+            // Stdin закрыт (например, запуск из IDE), ждём бесконечно
+            println("⚠️ Stdin не доступен, используем Ctrl+C для остановки")
+            try {
+                while (true) {
+                    Thread.sleep(1000)
+                }
+            } catch (e: InterruptedException) {
+                println("\n⚠️ Получен сигнал прерывания")
+            }
+        }
 
     } catch (e: Exception) {
         e.printStackTrace()

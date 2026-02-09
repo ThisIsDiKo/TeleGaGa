@@ -1,7 +1,10 @@
 package ru.dikoresearch.domain
 
+import GigaChatFunction
+import GigaChatFunctionCall
 import GigaChatMessage
 import Usage
+import kotlinx.serialization.json.*
 import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 
@@ -46,6 +49,195 @@ class ChatOrchestrator(
 
         val answer = response.choices.firstOrNull()?.message?.content ?: "Пустой ответ"
         return answer to response.usage
+    }
+
+    /**
+     * Обрабатывает сообщение с поддержкой function calling
+     *
+     * @param systemRole системный промпт
+     * @param userMessage текст сообщения пользователя
+     * @param temperature температура модели
+     * @param model название модели GigaChat
+     * @param functions список доступных функций
+     * @param functionExecutor функция для выполнения вызовов функций
+     * @param maxIterations максимальное количество итераций (защита от зацикливания)
+     * @return тройка: (финальный ответ, usage, история вызовов функций)
+     */
+    suspend fun processMessageWithFunctionCalling(
+        systemRole: String,
+        userMessage: String,
+        temperature: Float,
+        model: String = "GigaChat",
+        functions: List<GigaChatFunction>,
+        functionExecutor: suspend (String, Map<String, Any>) -> String,
+        maxIterations: Int = 5
+    ): Triple<String, Usage, List<String>> {
+        val history = mutableListOf(
+            GigaChatMessage(role = "system", content = systemRole),
+            GigaChatMessage(role = "user", content = userMessage)
+        )
+
+        val functionCallsLog = mutableListOf<String>()
+        var totalUsage = Usage(promptTokens = 0, completionTokens = 0, totalTokens = 0, precachedPromptTokens = 0)
+
+        // LOG: Show initial request to GigaChat
+        println("\n" + "=".repeat(80))
+        println("📤 REQUEST TO GIGACHAT")
+        println("=".repeat(80))
+        println("SYSTEM ROLE (${systemRole.length} chars):")
+        println(systemRole)
+        println("\n${"-".repeat(80)}")
+        println("USER MESSAGE (${userMessage.length} chars):")
+        println(userMessage)
+        println("\n${"-".repeat(80)}")
+        println("FUNCTIONS AVAILABLE: ${functions.size}")
+        functions.forEach { println("   - ${it.name}: ${it.description}") }
+        println("=".repeat(80) + "\n")
+
+        repeat(maxIterations) { iteration ->
+            println("🔄 Function calling iteration ${iteration + 1}/$maxIterations")
+
+            // Make request with functions
+            val response = try {
+                gigaClient.chatCompletion(
+                    model = model,
+                    messages = history,
+                    temperature = temperature,
+                    functions = functions,
+                    functionCall = "auto"
+                )
+            } catch (e: Exception) {
+                println("❌ GigaChat error in processMessageWithFunctionCalling: ${e}")
+                throw ChatException("Error calling GigaChat LLM", e)
+            }
+
+            // Accumulate token usage
+            totalUsage = Usage(
+                promptTokens = totalUsage.promptTokens + response.usage.promptTokens,
+                completionTokens = totalUsage.completionTokens + response.usage.completionTokens,
+                totalTokens = totalUsage.totalTokens + response.usage.totalTokens,
+                precachedPromptTokens = totalUsage.precachedPromptTokens + response.usage.precachedPromptTokens
+            )
+
+            val choice = response.choices.firstOrNull()
+            val message = choice?.message
+
+            // LOG: Show GigaChat response
+            println("\n" + "=".repeat(80))
+            println("📥 RESPONSE FROM GIGACHAT")
+            println("=".repeat(80))
+            println("FINISH REASON: ${choice?.finishReason}")
+            println("MESSAGE ROLE: ${message?.role}")
+            println("MESSAGE CONTENT: ${message?.content}")
+            println("FUNCTION CALL: ${message?.functionCall?.name}")
+            if (message?.functionCall != null) {
+                println("FUNCTION ARGUMENTS: ${message.functionCall.arguments}")
+            }
+            println("=".repeat(80) + "\n")
+
+            // Check if model wants to call a function
+            if (choice?.finishReason == "function_call" && message?.functionCall != null) {
+                val functionCall = message.functionCall!!
+                val functionName = functionCall.name
+
+                println("📞 Function call requested: $functionName")
+                functionCallsLog.add("Called: $functionName")
+
+                // Parse arguments
+                val argsMap = try {
+                    when (val args = functionCall.arguments) {
+                        is JsonObject -> args.toMap().mapValues { (_, v) ->
+                            when (v) {
+                                is JsonPrimitive -> v.contentOrNull ?: v.toString()
+                                else -> v.toString()
+                            }
+                        }
+                        is JsonPrimitive -> {
+                            // Try to parse as JSON object string
+                            val argsStr = args.content
+                            if (argsStr.startsWith("{")) {
+                                Json.parseToJsonElement(argsStr).jsonObject.toMap().mapValues { (_, v) ->
+                                    when (v) {
+                                        is JsonPrimitive -> v.contentOrNull ?: v.toString()
+                                        else -> v.toString()
+                                    }
+                                }
+                            } else {
+                                emptyMap()
+                            }
+                        }
+                        else -> emptyMap()
+                    }
+                } catch (e: Exception) {
+                    println("⚠️ Failed to parse function arguments: ${e.message}")
+                    emptyMap()
+                }
+
+                // Execute function
+                val result = try {
+                    functionExecutor(functionName, argsMap)
+                } catch (e: Exception) {
+                    println("❌ Function execution error: ${e.message}")
+                    // Already JSON format for errors
+                    "{\"error\": \"${e.message}\"}"
+                }
+
+                println("✅ Function result: ${result.take(100)}...")
+
+                // Truncate result if too long (to avoid 413 Request Entity Too Large)
+                val truncatedResult = if (result.length > 1500) {
+                    result.take(1500) + "\n\n... (truncated due to length, showing first 1500 chars)"
+                } else {
+                    result
+                }
+
+                if (result.length > 1500) {
+                    println("⚠️ Function result truncated: ${result.length} -> 1500 chars")
+                }
+
+                // GigaChat requires function results to be valid JSON
+                // Wrap plain text results in JSON object
+                val jsonResult = if (truncatedResult.trim().startsWith("{") || truncatedResult.trim().startsWith("[")) {
+                    // Already JSON
+                    truncatedResult
+                } else {
+                    // Plain text - wrap in JSON object
+                    // Escape quotes and newlines
+                    val escapedResult = truncatedResult
+                        .replace("\\", "\\\\")
+                        .replace("\"", "\\\"")
+                        .replace("\n", "\\n")
+                        .replace("\r", "\\r")
+                        .replace("\t", "\\t")
+                    "{\"result\": \"$escapedResult\"}"
+                }
+
+                println("📋 JSON result for GigaChat: ${jsonResult.take(100)}...")
+
+                // Add function call and result to history
+                history.add(GigaChatMessage(
+                    role = "assistant",
+                    content = "",
+                    functionCall = functionCall
+                ))
+                history.add(GigaChatMessage(
+                    role = "function",
+                    content = jsonResult,
+                    name = functionName
+                ))
+
+                // Continue to next iteration
+            } else {
+                // Got final answer
+                val answer = message?.content ?: "Empty response"
+                println("✅ Final answer received (${answer.length} chars)")
+                return Triple(answer, totalUsage, functionCallsLog)
+            }
+        }
+
+        // Max iterations reached
+        println("⚠️ Max iterations ($maxIterations) reached")
+        return Triple("Max function calling iterations reached", totalUsage, functionCallsLog)
     }
 
     /**

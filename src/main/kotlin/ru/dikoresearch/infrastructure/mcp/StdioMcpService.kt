@@ -95,6 +95,10 @@ class StdioMcpService(
                 serverTools[config.name] = tools
 
                 println("   ✅ ${config.name}: ${tools.size} tools")
+                tools.forEach { tool ->
+                    println("      - ${tool.name}: ${tool.description}")
+                    println("        Input schema: ${tool.inputSchema}")
+                }
             } catch (e: Exception) {
                 println("   ❌ Failed to initialize ${config.name}: ${e.message}")
                 e.printStackTrace()

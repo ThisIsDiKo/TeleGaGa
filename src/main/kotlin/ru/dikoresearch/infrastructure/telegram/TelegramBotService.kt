@@ -1,6 +1,10 @@
 package ru.dikoresearch.infrastructure.telegram
 
+import GigaChatFunction
+import GigaChatFunctionCall
+import GigaChatFunctionParameters
 import GigaChatMessage
+import GigaChatPropertySchema
 import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.bot
 import com.github.kotlintelegrambot.dispatch
@@ -12,6 +16,7 @@ import com.github.kotlintelegrambot.entities.ParseMode
 import com.github.kotlintelegrambot.extensions.filters.Filter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.*
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
 import ru.dikoresearch.domain.TextChunker
@@ -32,6 +37,7 @@ class TelegramBotService(
     private val embeddingsManager: EmbeddingsManager,
     private val textChunker: TextChunker,
     private val ollamaClient: ru.dikoresearch.infrastructure.http.OllamaClient,
+    private val gitMcpService: ru.dikoresearch.infrastructure.mcp.StdioMcpService,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
@@ -69,6 +75,78 @@ class TelegramBotService(
     }
 
     /**
+     * Helper function to create embeddings for a single file
+     */
+    private suspend fun createEmbeddingsForFile(
+        chatId: Long,
+        filePath: String,
+        bot: Bot,
+        embeddingService: EmbeddingService,
+        embeddingsManager: EmbeddingsManager,
+        textChunker: TextChunker
+    ): String {
+        val file = File(filePath)
+        if (!file.exists()) {
+            return "❌ File not found: $filePath"
+        }
+
+        val originalText = file.readText()
+        val startTime = System.currentTimeMillis()
+
+        val embeddingsWithMetadata = embeddingService.generateEmbeddingsWithMetadata(
+            originalText,
+            file.name
+        )
+
+        val endTime = System.currentTimeMillis()
+        val durationSeconds = (endTime - startTime) / 1000.0
+
+        val fileNameWithoutExtension = file.nameWithoutExtension
+        embeddingsManager.saveEmbeddingsWithMetadata(
+            fileName = fileNameWithoutExtension,
+            embeddings = embeddingsWithMetadata,
+            chunkSize = textChunker.chunkSize
+        )
+
+        return "✅ ${file.name}: ${embeddingsWithMetadata.size} chunks in %.1f sec".format(durationSeconds)
+    }
+
+    /**
+     * Helper function to convert MCP tools to GigaChat functions format
+     */
+    private fun convertMcpToolsToGigaChatFunctions(
+        tools: List<ru.dikoresearch.infrastructure.mcp.StdioMcpService.Tool>
+    ): List<GigaChatFunction> {
+        return tools.map { tool ->
+            val inputSchema = tool.inputSchema
+
+            // Extract properties from JSON Schema
+            val properties = inputSchema["properties"]?.jsonObject?.mapValues { (_, value) ->
+                val propObj = value.jsonObject
+                GigaChatPropertySchema(
+                    type = propObj["type"]?.jsonPrimitive?.content ?: "string",
+                    description = propObj["description"]?.jsonPrimitive?.content
+                )
+            } ?: emptyMap()
+
+            // Extract required fields
+            val required = inputSchema["required"]?.jsonArray?.mapNotNull {
+                it.jsonPrimitive?.content
+            }
+
+            GigaChatFunction(
+                name = tool.name,
+                description = tool.description,
+                parameters = GigaChatFunctionParameters(
+                    type = "object",
+                    properties = properties,
+                    required = required
+                )
+            )
+        }
+    }
+
+    /**
      * Настройка обработчиков команд
      */
     private fun Dispatcher.setupCommands() {
@@ -77,26 +155,25 @@ class TelegramBotService(
             bot.sendMessage(
                 chatId = ChatId.fromId(chatId),
                 text = buildString {
-                    appendLine("👋 Привет! Я TeleGaGa бот с поддержкой RAG.")
+                    appendLine("👋 Hello! I'm TeleGaGa bot with RAG support.")
                     appendLine()
-                    appendLine("🤖 AI модели:")
-                    appendLine("• GigaChat - основная модель для чата")
-                    appendLine("• Ollama (nomic-embed-text) - локальные embeddings")
+                    appendLine("🤖 AI Models:")
+                    appendLine("• GigaChat - main chat model (analysis & responses)")
+                    appendLine("• Ollama (nomic-embed-text) - local embeddings for RAG")
                     appendLine()
-                    appendLine("📋 Доступные команды:")
-                    appendLine("/changeRole <текст> - изменить системный промпт")
-                    appendLine("/changeT <число> - изменить температуру (0.0-1.0)")
-                    appendLine("/clearChat - очистить историю чата")
+                    appendLine("📋 Chat Commands:")
+                    appendLine("/changeRole <text> - change system prompt")
+                    appendLine("/changeT <number> - change temperature (0.0-1.0)")
+                    appendLine("/clearChat - clear chat history")
                     appendLine()
-                    appendLine("🧠 RAG команды:")
-                    appendLine("/createEmbeddings - создать embeddings из rag_docs/readme.md")
-                    appendLine("/testRag <вопрос> - сравнить ответы с RAG и без RAG")
-                    appendLine("/compareRag <вопрос> - сравнить 3 подхода (без RAG, RAG, RAG+фильтр)")
-                    appendLine("/testRagCitations <вопрос> - тестирование RAG с цитированием (llama3.2:3b)")
-                    appendLine("/setThreshold <0.0-1.0> - настроить порог релевантности")
+                    appendLine("🔍 RAG Commands:")
+                    appendLine("/help <question> - Ask questions about project (uses GigaChat + RAG)")
+                    appendLine("/createEmbeddings - create embeddings from all .md files in rag_docs/")
+                    appendLine("/setThreshold <0.0-1.0> - set relevance threshold for RAG")
                     appendLine()
-                    appendLine("💡 Для работы embeddings нужна запущенная Ollama:")
-                    appendLine("ollama pull nomic-embed-text")
+                    appendLine("💡 Requirements:")
+                    appendLine("• Ollama must be running: ollama pull nomic-embed-text")
+                    appendLine("• GigaChat API key configured")
                 }
             )
         }
@@ -739,104 +816,228 @@ Question: $query
 
         command("createEmbeddings") {
             val chatId = message.chat.id
+            val fileName = args.firstOrNull()
+
+            applicationScope.launch {
+                try {
+                    if (fileName != null) {
+                        // Single file mode
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "🦙 Generating embeddings for $fileName...\n(using Ollama local model)"
+                        )
+
+                        val result = createEmbeddingsForFile(
+                            chatId,
+                            "rag_docs/$fileName",
+                            bot,
+                            embeddingService,
+                            embeddingsManager,
+                            textChunker
+                        )
+
+                        bot.sendMessage(ChatId.fromId(chatId), result)
+                    } else {
+                        // Process ALL .md files in rag_docs/
+                        val ragDir = File("rag_docs")
+                        if (!ragDir.exists()) {
+                            bot.sendMessage(
+                                ChatId.fromId(chatId),
+                                "❌ Directory rag_docs/ not found"
+                            )
+                            return@launch
+                        }
+
+                        val mdFiles = ragDir.listFiles { file ->
+                            file.extension == "md"
+                        }?.toList() ?: emptyList()
+
+                        if (mdFiles.isEmpty()) {
+                            bot.sendMessage(
+                                ChatId.fromId(chatId),
+                                "❌ No .md files found in rag_docs/"
+                            )
+                            return@launch
+                        }
+
+                        bot.sendMessage(
+                            ChatId.fromId(chatId),
+                            "🦙 Found ${mdFiles.size} markdown files. Processing...\n(using Ollama local model)"
+                        )
+
+                        val results = mutableListOf<String>()
+                        mdFiles.forEachIndexed { i, file ->
+                            bot.sendMessage(
+                                ChatId.fromId(chatId),
+                                "[${i + 1}/${mdFiles.size}] Processing ${file.name}..."
+                            )
+
+                            val result = createEmbeddingsForFile(
+                                chatId,
+                                file.absolutePath,
+                                bot,
+                                embeddingService,
+                                embeddingsManager,
+                                textChunker
+                            )
+                            results.add(result)
+                        }
+
+                        val summary = buildString {
+                            appendLine("✅ Embeddings created for ${mdFiles.size} files!")
+                            appendLine()
+                            results.forEach { appendLine(it) }
+                        }
+
+                        bot.sendMessage(ChatId.fromId(chatId), summary)
+                    }
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "❌ Error: ${e.message}\n\n" +
+                               "💡 Make sure Ollama is running:\n" +
+                               "ollama pull nomic-embed-text"
+                    )
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        command("help") {
+            val chatId = message.chat.id
+            val question = args.joinToString(" ")
+
+            if (question.isBlank()) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = """
+                        🔍 PROJECT HELP
+
+                        Usage: /help <your question>
+
+                        Examples:
+                        • /help What MCP servers are available?
+                        • /help How do I change temperature?
+                        • /help How to add a new command?
+
+                        This command uses RAG to search all project documentation.
+                    """.trimIndent()
+                )
+                return@command
+            }
 
             applicationScope.launch {
                 try {
                     bot.sendMessage(
                         chatId = ChatId.fromId(chatId),
-                        text = "🦙 Начинаю генерацию embeddings из файла rag_docs/readme.md...\n" +
-                               "(используется локальная модель Ollama)"
+                        text = "🔍 Searching documentation..."
                     )
 
-                    // Читаем файл
-                    val file = File("rag_docs/readme.md")
-                    if (!file.exists()) {
+                    // Step 1: Load RAG settings
+                    val settings = settingsManager.loadSettings(chatId)
+
+                    // Step 2: Search across all documentation files
+                    val ragService = ru.dikoresearch.domain.RagService(embeddingService)
+
+                    val searchResult = ragService.findRelevantChunksAcrossAllFiles(
+                        question = question,
+                        topK = 5,
+                        relevanceThreshold = settings.ragRelevanceThreshold
+                    )
+
+                    if (searchResult.chunks.isEmpty()) {
                         bot.sendMessage(
                             chatId = ChatId.fromId(chatId),
-                            text = "❌ Ошибка: файл rag_docs/readme.md не найден.\n\n" +
-                                   "Создайте папку rag_docs и поместите туда readme.md"
+                            text = """
+                                ❌ No relevant documentation found.
+
+                                Try:
+                                • Rephrasing your question
+                                • Running /createEmbeddings to refresh docs
+                                • Checking if embeddings exist
+                            """.trimIndent()
                         )
                         return@launch
                     }
 
-                    val originalText = file.readText()
-                    val startTime = System.currentTimeMillis()
+                    // Step 3: Format context with citations
+                    val ragContext = ragService.formatContextForMultipleFiles(searchResult.chunks)
 
-                    // Генерируем embeddings с предобработкой Markdown и метаданными
-                    // (удаление код-блоков, разбиение на абзацы с сохранением номеров строк)
-                    val embeddingsWithMetadata = embeddingService.generateEmbeddingsWithMetadata(
-                        originalText,
-                        "readme.md"
-                    )
+                    // Step 4: Build prompt for GigaChat with RAG context (documentation only)
+                    val systemRole = """
+                        You are a programming assistant for the TeleGaGa project.
+                        Answer questions based on the provided documentation fragments.
 
-                    val endTime = System.currentTimeMillis()
-                    val durationSeconds = (endTime - startTime) / 1000.0
+                        RULES:
+                        - Answer in English only
+                        - Use documentation fragments as primary source
+                        - Include code snippets when relevant
+                        - Cite sources using [filename:lines] format
+                        - Be concise and specific
+                        - Include citations for facts from documentation
+                    """.trimIndent()
 
-                    // Сохраняем в JSON с метаданными
-                    val outputPath = embeddingsManager.saveEmbeddingsWithMetadata(
-                        fileName = "readme",
-                        embeddings = embeddingsWithMetadata,
-                        chunkSize = textChunker.chunkSize
-                    )
-
-                    // Получаем размерность вектора (берем из первого embedding)
-                    val vectorDimension = embeddingsWithMetadata.firstOrNull()?.embedding?.size ?: 0
-
-                    // Формируем детальное сообщение о результате
-                    val resultMessage = buildString {
-                        appendLine("✅ Embeddings с метаданными успешно созданы!")
+                    val userPrompt = buildString {
+                        appendLine(ragContext)
                         appendLine()
-                        appendLine("📊 Статистика:")
-                        appendLine("• Исходный файл: ${file.name}")
-                        appendLine("• Размер файла: ${originalText.length} символов")
-                        appendLine("• Создано чанков: ${embeddingsWithMetadata.size}")
-                        appendLine("• Размерность векторов: $vectorDimension")
-                        appendLine("• Время обработки: %.1f сек".format(durationSeconds))
-                        appendLine()
-                        appendLine("⚙️ Параметры чанкинга:")
-                        appendLine("• Размер чанка: ${textChunker.chunkSize} символов")
-                        appendLine("• Перекрытие: ${textChunker.overlap} символов (${(textChunker.overlap.toFloat() / textChunker.chunkSize * 100).toInt()}%)")
-                        appendLine()
-                        appendLine("💾 Результат сохранен:")
-                        appendLine("$outputPath")
-                        appendLine()
-                        appendLine("📝 Preview первого чанка:")
-
-                        // Показываем первый чанк и небольшую часть вектора
-                        if (embeddingsWithMetadata.isNotEmpty()) {
-                            val firstChunk = embeddingsWithMetadata.first()
-                            val chunkPreview = if (firstChunk.text.length > 150) {
-                                firstChunk.text.take(150) + "..."
-                            } else {
-                                firstChunk.text
-                            }
-                            appendLine("📍 Чанк #1 (строки ${firstChunk.startLine}-${firstChunk.endLine}):")
-                            appendLine("\"$chunkPreview\"")
-                            appendLine()
-                            appendLine("🔢 Вектор (первые 10 значений):")
-                            val vectorPreview = firstChunk.embedding.take(10).joinToString(", ") { "%.4f".format(it) }
-                            appendLine("[$vectorPreview, ...]")
-                        }
+                        appendLine("Question: $question")
                     }
 
-                    // Проверяем, что сообщение не превышает лимит Telegram (4096 символов)
-                    val finalMessage = if (resultMessage.length > 4000) {
-                        resultMessage.take(3997) + "..."
+                    // Step 5: Get answer from GigaChat (no function calling for /help)
+                    val (answer, usage) = chatOrchestrator.processMessageWithoutHistory(
+                        systemRole = systemRole,
+                        userMessage = userPrompt,
+                        temperature = 0.7f,
+                        model = gigaChatModel
+                    )
+
+                    // Step 6: Format final response
+                    val formattedAnswer = buildString {
+                        appendLine("━━━ PROJECT HELP (RAG) ━━━")
+                        appendLine()
+                        appendLine("🔍 Question: $question")
+                        appendLine()
+                        appendLine("📖 Answer:")
+                        appendLine(answer)
+                        appendLine()
+                        appendLine("━━━ SOURCES ━━━")
+                        searchResult.chunks.forEach { chunk ->
+                            appendLine("• ${chunk.fileName} (lines ${chunk.startLine}-${chunk.endLine})")
+                        }
+                        appendLine()
+                        appendLine("📊 Statistics:")
+                        appendLine("• Chunks found: ${searchResult.filteredCount}")
+                        appendLine("• Avg relevance: %.0f%%".format(searchResult.avgRelevance * 100))
+                        appendLine("• Threshold: ${settings.ragRelevanceThreshold}")
+                        appendLine("• Tokens used: ${usage.totalTokens}")
+                    }
+
+                    // Truncate if too long (Telegram limit: 4096 chars)
+                    val finalAnswer = if (formattedAnswer.length > 3800) {
+                        formattedAnswer.take(3800) + "\n\n... (truncated)"
                     } else {
-                        resultMessage
+                        formattedAnswer
                     }
 
                     bot.sendMessage(
                         chatId = ChatId.fromId(chatId),
-                        text = finalMessage
+                        text = finalAnswer
                     )
 
+                } catch (e: IllegalStateException) {
+                    // No embeddings found
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = """
+                            ❌ ${e.message}
+
+                            Please run: /createEmbeddings
+                        """.trimIndent()
+                    )
                 } catch (e: Exception) {
                     bot.sendMessage(
                         chatId = ChatId.fromId(chatId),
-                        text = "❌ Ошибка при генерации embeddings:\n${e.message}\n\n" +
-                               "💡 Убедитесь, что Ollama запущена:\n" +
-                               "ollama pull nomic-embed-text"
+                        text = "❌ Error: ${e.message}"
                     )
                     e.printStackTrace()
                 }
@@ -852,41 +1053,112 @@ Question: $query
             val chatId = message.chat.id
             val userMessage = message.text ?: return@message
 
+            println("📨 Получено сообщение от чата $chatId: '$userMessage'")
+
             // Используем applicationScope для обработки сообщения
             applicationScope.launch {
                 try {
+                    println("⚙️ Загрузка настроек для чата $chatId...")
                     // Получаем температуру для чата из настроек
                     val settings = settingsManager.loadSettings(chatId)
                     val temperature = settings.temperature
+                    println("✅ Настройки загружены, температура: $temperature")
 
-                    // Обрабатываем сообщение через ChatOrchestrator
-                    val response = chatOrchestrator.processMessage(
-                        chatId = chatId,
-                        userMessage = userMessage,
-                        systemRole = defaultSystemRole,
-                        temperature = temperature,
-                        model = gigaChatModel
-                    )
+                    // Get Git MCP tools
+                    val gitTools = gitMcpService.listTools()
+                    val gitFunctions = convertMcpToolsToGigaChatFunctions(gitTools)
 
-                    // Формируем ответ с информацией о токенах
-                    val fullResponse = buildString {
-                        appendLine(response.text)
-                        appendLine()
-                        appendLine("Отправлены токены: ${response.tokenUsage.promptTokens}")
-                        appendLine("Получены токены: ${response.tokenUsage.completionTokens}")
-                        appendLine("Оплачены токены: ${response.tokenUsage.totalTokens}")
-                    }
+                    println("🔧 Git MCP tools available: ${gitFunctions.size}")
 
-                    // Отправляем основной ответ
-                    sendMessageSafely(chatId, fullResponse)
+                    if (gitFunctions.isNotEmpty()) {
+                        println("🤖 Обработка сообщения через ChatOrchestrator с Git MCP function calling...")
 
-                    // Если была выполнена суммаризация, отправляем дополнительное сообщение
-                    response.summaryMessage?.let { summaryMsg ->
-                        sendMessageSafely(chatId, summaryMsg)
+                        // Enhanced system role with git tools instructions
+                        val enhancedSystemRole = """
+                            $defaultSystemRole
+
+                            IMPORTANT: You have access to Git tools for repository /Users/dmitriikonovalov/Documents/TeleGaGa.
+
+                            MANDATORY - Use git tools when user asks about:
+                            - branches (list/current) → CALL git_list_branches or git_show_current_branch
+                            - commits/history → CALL git_log
+                            - repository status/changes → CALL git_status
+                            - files in repository → CALL appropriate git tool
+
+                            DO NOT just describe git commands - ALWAYS CALL the actual tool to get real data.
+                            Answer in English only.
+                        """.trimIndent()
+
+                        // Process with function calling
+                        val (answer, usage, functionCalls) = chatOrchestrator.processMessageWithFunctionCalling(
+                            systemRole = enhancedSystemRole,
+                            userMessage = userMessage,
+                            temperature = temperature,
+                            model = gigaChatModel,
+                            functions = gitFunctions,
+                            functionExecutor = { functionName, args ->
+                                println("🔧 Executing git tool: $functionName with args: $args")
+                                val result = gitMcpService.callTool(functionName, args)
+                                val text = result.content.firstOrNull()?.text ?: result.toString()
+                                println("✅ Git tool result: ${text.take(200)}...")
+                                text
+                            },
+                            maxIterations = 3
+                        )
+
+                        println("✅ Получен ответ от ChatOrchestrator (${answer.length} символов)")
+                        if (functionCalls.isNotEmpty()) {
+                            println("🔧 Function calls used: ${functionCalls.joinToString(", ")}")
+                        }
+
+                        // Формируем ответ с информацией о токенах
+                        val fullResponse = buildString {
+                            appendLine(answer)
+                            appendLine()
+                            if (functionCalls.isNotEmpty()) {
+                                appendLine("🔧 Git tools used: ${functionCalls.joinToString(", ")}")
+                                appendLine()
+                            }
+                            appendLine("Отправлены токены: ${usage.promptTokens}")
+                            appendLine("Получены токены: ${usage.completionTokens}")
+                            appendLine("Оплачены токены: ${usage.totalTokens}")
+                        }
+
+                        // Отправляем основной ответ
+                        sendMessageSafely(chatId, fullResponse)
+                    } else {
+                        // Fallback to simple message processing without git MCP
+                        println("🤖 Обработка сообщения через ChatOrchestrator (без Git MCP)...")
+                        val response = chatOrchestrator.processMessage(
+                            chatId = chatId,
+                            userMessage = userMessage,
+                            systemRole = defaultSystemRole,
+                            temperature = temperature,
+                            model = gigaChatModel
+                        )
+                        println("✅ Получен ответ от ChatOrchestrator (${response.text.length} символов)")
+
+                        // Формируем ответ с информацией о токенах
+                        val fullResponse = buildString {
+                            appendLine(response.text)
+                            appendLine()
+                            appendLine("Отправлены токены: ${response.tokenUsage.promptTokens}")
+                            appendLine("Получены токены: ${response.tokenUsage.completionTokens}")
+                            appendLine("Оплачены токены: ${response.tokenUsage.totalTokens}")
+                        }
+
+                        // Отправляем основной ответ
+                        sendMessageSafely(chatId, fullResponse)
+
+                        // Если была выполнена суммаризация, отправляем дополнительное сообщение
+                        response.summaryMessage?.let { summaryMsg ->
+                            sendMessageSafely(chatId, summaryMsg)
+                        }
                     }
 
                 } catch (e: Exception) {
-                    println("Ошибка при обработке сообщения от чата $chatId: ${e.message}")
+                    println("❌ Ошибка при обработке сообщения от чата $chatId: ${e.message}")
+                    e.printStackTrace()
                     sendMessageSafely(
                         chatId,
                         "Произошла ошибка при обработке сообщения: ${e.message}"
