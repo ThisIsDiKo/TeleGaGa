@@ -30,7 +30,8 @@ class StdioMcpService(
     data class ServerConfig(
         val name: String,
         val command: String,  // e.g., "/Users/user/.local/bin/mcp-server-docker"
-        val args: List<String> = emptyList()
+        val args: List<String> = emptyList(),
+        val envVars: Map<String, String> = emptyMap()  // Environment variables for the process
     )
 
     data class ProcessInfo(
@@ -118,6 +119,12 @@ class StdioMcpService(
         val command = mutableListOf(config.command) + config.args
         val processBuilder = ProcessBuilder(command)
             .redirectError(ProcessBuilder.Redirect.INHERIT)  // Show errors in console
+
+        // Add environment variables if provided
+        if (config.envVars.isNotEmpty()) {
+            processBuilder.environment().putAll(config.envVars)
+            println("   🔑 Added ${config.envVars.size} environment variables")
+        }
 
         val process = processBuilder.start()
         val writer = BufferedWriter(OutputStreamWriter(process.outputStream))

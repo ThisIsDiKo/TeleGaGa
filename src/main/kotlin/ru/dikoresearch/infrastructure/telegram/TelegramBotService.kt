@@ -19,6 +19,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import ru.dikoresearch.domain.ChatException
 import ru.dikoresearch.domain.ChatOrchestrator
+import ru.dikoresearch.domain.DiffAnalyzer
+import ru.dikoresearch.domain.DiffChunker
+import ru.dikoresearch.domain.DiffParser
+import ru.dikoresearch.domain.PullRequestInfo
 import ru.dikoresearch.domain.TextChunker
 import ru.dikoresearch.infrastructure.embeddings.EmbeddingService
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
@@ -37,7 +41,9 @@ class TelegramBotService(
     private val embeddingsManager: EmbeddingsManager,
     private val textChunker: TextChunker,
     private val ollamaClient: ru.dikoresearch.infrastructure.http.OllamaClient,
+    private val gigaChatClient: ru.dikoresearch.infrastructure.http.GigaChatClient,
     private val gitMcpService: ru.dikoresearch.infrastructure.mcp.StdioMcpService,
+    private val githubMcpService: ru.dikoresearch.infrastructure.mcp.StdioMcpService?,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
@@ -171,9 +177,13 @@ class TelegramBotService(
                     appendLine("/createEmbeddings - create embeddings from all .md files in rag_docs/")
                     appendLine("/setThreshold <0.0-1.0> - set relevance threshold for RAG")
                     appendLine()
+                    appendLine("🔧 GitHub Commands:")
+                    appendLine("/showPR [number] - Analyze Pull Request with RAG + GigaChat")
+                    appendLine()
                     appendLine("💡 Requirements:")
                     appendLine("• Ollama must be running: ollama pull nomic-embed-text")
                     appendLine("• GigaChat API key configured")
+                    appendLine("• GitHub token in config.properties (for /showPR)")
                 }
             )
         }
@@ -1043,6 +1053,180 @@ Question: $query
                 }
             }
         }
+
+        command("showPR") {
+            val chatId = message.chat.id
+            val prNumberArg = args.firstOrNull()
+
+            // Check if GitHub MCP is available
+            if (githubMcpService == null || !githubMcpService.isAvailable()) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = """
+                        GitHub MCP service is not available.
+
+                        Setup:
+                        1. Add GitHub token to config.properties:
+                           github.token=ghp_your_token_here
+                           github.owner=your_username
+                           github.repo=your_repo
+
+                        2. Restart the bot
+
+                        Token scopes needed:
+                        - public_repo (for public repos)
+                        - repo (for private repos)
+                    """.trimIndent()
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                try {
+                    // Step 1: Fetch PR information
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = if (prNumberArg != null) {
+                            "Fetching Pull Request #$prNumberArg..."
+                        } else {
+                            "Fetching latest open Pull Request..."
+                        }
+                    )
+
+                    val prInfo = if (prNumberArg != null) {
+                        getPullRequestByNumber(prNumberArg.toInt())
+                    } else {
+                        getLatestOpenPullRequest()
+                    }
+
+                    if (prInfo == null) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "No Pull Request found."
+                        )
+                        return@launch
+                    }
+
+                    // Send PR summary
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = prInfo.formatSummary()
+                    )
+
+                    // Step 2: RAG Analysis
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Analyzing Pull Request with RAG and local documentation..."
+                    )
+
+                    val ragContext = try {
+                        val ragService = ru.dikoresearch.domain.RagService(embeddingService)
+                        val query = buildString {
+                            appendLine("Context: Analyzing pull request for code review")
+                            appendLine()
+                            appendLine("PR Title: ${prInfo.title}")
+                            appendLine("PR Description: ${prInfo.description.take(500)}")
+                            appendLine("Modified files: ${prInfo.modifiedFiles.joinToString(", ")}")
+                            appendLine()
+                            appendLine("Question: What project components, patterns, and best practices are relevant to this PR?")
+                        }
+
+                        val searchResult = ragService.findRelevantChunksAcrossAllFiles(
+                            question = query,
+                            topK = 5,
+                            relevanceThreshold = 0.5f
+                        )
+
+                        ragService.formatContextForMultipleFiles(searchResult.chunks)
+                    } catch (e: Exception) {
+                        // RAG is optional, continue without it
+                        ""
+                    }
+
+                    // Step 3: Get diff and analyze
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Getting diff from Pull Request and analyzing it..."
+                    )
+
+                    val diff = getPullRequestDiff(prInfo.number)
+
+                    if (diff.isBlank()) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "No diff available for this Pull Request."
+                        )
+                        return@launch
+                    }
+
+                    // Parse diff
+                    val files = DiffParser.parseDiffIntoFiles(diff)
+                    val analyzableFiles = files.filter { DiffParser.shouldAnalyzeFile(it.fileName) }
+
+                    if (analyzableFiles.isEmpty()) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "No code files to analyze (only binary files or no changes)."
+                        )
+                        return@launch
+                    }
+
+                    // Chunk files
+                    val chunks = DiffChunker.groupFilesIntoChunks(analyzableFiles, maxChunkSize = 3000)
+
+                    // Analyze each chunk
+                    val analyzer = DiffAnalyzer(
+                        gigaChatClient = gigaChatClient,
+                        model = gigaChatModel
+                    )
+
+                    val analyses = chunks.mapIndexed { index, chunk ->
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = "Analyzing chunk ${index + 1} of ${chunks.size}..."
+                        )
+
+                        analyzer.analyzeChunk(
+                            chunk = chunk,
+                            ragContext = ragContext,
+                            chunkIndex = index,
+                            totalChunks = chunks.size
+                        )
+                    }
+
+                    // Step 4: Synthesize and send report
+                    val report = analyzer.synthesizeReport(analyses)
+
+                    val reportText = report.format()
+
+                    // Split report if too long
+                    if (reportText.length <= 4000) {
+                        bot.sendMessage(
+                            chatId = ChatId.fromId(chatId),
+                            text = reportText,
+                            parseMode = ParseMode.MARKDOWN
+                        )
+                    } else {
+                        // Send in multiple messages
+                        val parts = reportText.chunked(4000)
+                        parts.forEachIndexed { index, part ->
+                            bot.sendMessage(
+                                chatId = ChatId.fromId(chatId),
+                                text = if (index == 0) part else "...$part",
+                                parseMode = ParseMode.MARKDOWN
+                            )
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Error analyzing PR: ${e.message}"
+                    )
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 
     /**
@@ -1183,5 +1367,147 @@ Question: $query
                 println("Ошибка отправки сообщения в Telegram для чата $chatId: $error")
             }
         )
+    }
+
+    /**
+     * Get latest open Pull Request using GitHub MCP
+     */
+    private suspend fun getLatestOpenPullRequest(): PullRequestInfo? {
+        if (githubMcpService == null) return null
+
+        return try {
+            // List open PRs
+            val result = githubMcpService.callTool(
+                name = "list_pull_requests",
+                args = mapOf(
+                    "owner" to (settingsManager.loadSettings(0).ragRelevanceThreshold.toString()), // Placeholder
+                    "repo" to "TeleGaGa",
+                    "state" to "open"
+                )
+            )
+
+            // Parse first PR from result
+            parsePullRequestFromList(result)
+        } catch (e: Exception) {
+            println("Error fetching PRs: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Get Pull Request by number using GitHub MCP
+     */
+    private suspend fun getPullRequestByNumber(number: Int): PullRequestInfo? {
+        if (githubMcpService == null) return null
+
+        return try {
+            val result = githubMcpService.callTool(
+                name = "get_pull_request",
+                args = mapOf(
+                    "owner" to "placeholder",
+                    "repo" to "TeleGaGa",
+                    "pull_number" to number
+                )
+            )
+
+            parsePullRequest(result)
+        } catch (e: Exception) {
+            println("Error fetching PR #$number: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Get Pull Request diff using GitHub MCP
+     */
+    private suspend fun getPullRequestDiff(number: Int): String {
+        if (githubMcpService == null) return ""
+
+        return try {
+            val result = githubMcpService.callTool(
+                name = "get_pull_request_diff",
+                args = mapOf(
+                    "owner" to "placeholder",
+                    "repo" to "TeleGaGa",
+                    "pull_number" to number
+                )
+            )
+
+            // Extract text from result
+            result.content.firstOrNull()?.text ?: ""
+        } catch (e: Exception) {
+            println("Error fetching PR diff #$number: ${e.message}")
+            ""
+        }
+    }
+
+    /**
+     * Parse Pull Request from MCP result
+     */
+    private fun parsePullRequest(result: ru.dikoresearch.infrastructure.mcp.StdioMcpService.CallToolResponse): PullRequestInfo? {
+        return try {
+            val text = result.content.firstOrNull()?.text ?: return null
+            val json = Json { ignoreUnknownKeys = true }
+
+            // GitHub MCP returns JSON with PR details
+            val jsonElement = json.parseToJsonElement(text)
+            val prObj = jsonElement.jsonObject
+
+            PullRequestInfo(
+                number = prObj["number"]?.jsonPrimitive?.int ?: 0,
+                title = prObj["title"]?.jsonPrimitive?.content ?: "",
+                description = prObj["body"]?.jsonPrimitive?.content ?: "",
+                state = prObj["state"]?.jsonPrimitive?.content ?: "unknown",
+                author = prObj["user"]?.jsonObject?.get("login")?.jsonPrimitive?.content,
+                modifiedFiles = parseModifiedFiles(prObj)
+            )
+        } catch (e: Exception) {
+            println("Error parsing PR: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Parse Pull Request from list result
+     */
+    private fun parsePullRequestFromList(result: ru.dikoresearch.infrastructure.mcp.StdioMcpService.CallToolResponse): PullRequestInfo? {
+        return try {
+            val text = result.content.firstOrNull()?.text ?: return null
+            val json = Json { ignoreUnknownKeys = true }
+
+            val jsonElement = json.parseToJsonElement(text)
+            val prsArray = jsonElement.jsonArray
+
+            if (prsArray.isEmpty()) return null
+
+            // Get first PR
+            val prObj = prsArray.first().jsonObject
+
+            PullRequestInfo(
+                number = prObj["number"]?.jsonPrimitive?.int ?: 0,
+                title = prObj["title"]?.jsonPrimitive?.content ?: "",
+                description = prObj["body"]?.jsonPrimitive?.content ?: "",
+                state = prObj["state"]?.jsonPrimitive?.content ?: "unknown",
+                author = prObj["user"]?.jsonObject?.get("login")?.jsonPrimitive?.content,
+                modifiedFiles = emptyList() // Will be fetched later
+            )
+        } catch (e: Exception) {
+            println("Error parsing PR list: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Parse modified files from PR object
+     */
+    private fun parseModifiedFiles(prObj: JsonObject): List<String> {
+        return try {
+            val filesArray = prObj["files"]?.jsonArray
+            filesArray?.mapNotNull { fileElement ->
+                fileElement.jsonObject["filename"]?.jsonPrimitive?.content
+            } ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 }

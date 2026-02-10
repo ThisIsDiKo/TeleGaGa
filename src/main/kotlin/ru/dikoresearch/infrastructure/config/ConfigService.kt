@@ -13,7 +13,10 @@ class ConfigService private constructor(
     val telegramToken: String,
     val gigaChatAuthKey: String,
     val gigaChatBaseUrl: String,
-    val gigaChatModel: String
+    val gigaChatModel: String,
+    val githubToken: String?,
+    val githubOwner: String?,
+    val githubRepo: String?
 ) {
     companion object {
         private const val CONFIG_FILE = "config.properties"
@@ -58,6 +61,9 @@ class ConfigService private constructor(
             val gigaChatAuthKey = properties.getProperty("gigachat.authKey")?.trim()
             val gigaChatBaseUrl = properties.getProperty("gigachat.baseUrl")?.trim()
             val gigaChatModel = properties.getProperty("gigachat.model")?.trim()
+            val githubToken = properties.getProperty("github.token")?.trim()
+            val githubOwner = properties.getProperty("github.owner")?.trim()
+            val githubRepo = properties.getProperty("github.repo")?.trim()
 
             // Валидация обязательных параметров
             val missingParams = mutableListOf<String>()
@@ -81,7 +87,10 @@ class ConfigService private constructor(
                 telegramToken = telegramToken!!,
                 gigaChatAuthKey = gigaChatAuthKey!!,
                 gigaChatBaseUrl = gigaChatBaseUrl!!,
-                gigaChatModel = gigaChatModel!!
+                gigaChatModel = gigaChatModel!!,
+                githubToken = githubToken,
+                githubOwner = githubOwner,
+                githubRepo = githubRepo
             )
         }
 
@@ -96,6 +105,9 @@ class ConfigService private constructor(
             properties.setProperty("gigachat.authKey", "")
             properties.setProperty("gigachat.baseUrl", "https://gigachat.devices.sberbank.ru")
             properties.setProperty("gigachat.model", "GigaChat")
+            properties.setProperty("github.token", "")
+            properties.setProperty("github.owner", "")
+            properties.setProperty("github.repo", "")
 
             FileOutputStream(templateFile).use { output ->
                 properties.store(output, "TeleGaGa Configuration Template - заполните параметры и сохраните как config.properties")
@@ -112,6 +124,9 @@ class ConfigService private constructor(
             |  gigaChatAuthKey: ${gigaChatAuthKey.take(10)}...
             |  gigaChatBaseUrl: $gigaChatBaseUrl
             |  gigaChatModel: $gigaChatModel
+            |  githubToken: ${if (githubToken != null) "${githubToken.take(10)}..." else "not set"}
+            |  githubOwner: ${githubOwner ?: "not set"}
+            |  githubRepo: ${githubRepo ?: "not set"}
         """.trimMargin()
     }
 }

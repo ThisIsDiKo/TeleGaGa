@@ -230,6 +230,47 @@ fun main() {
         }
         println()
 
+        // 7.5. Инициализация GitHub MCP Service
+        println("7.5. Инициализация GitHub MCP Service...")
+        val githubMcpService = if (!config.githubToken.isNullOrBlank()) {
+            try {
+                // Find npx in PATH
+                val npxPath = System.getenv("PATH")?.split(":")
+                    ?.map { "$it/npx" }
+                    ?.firstOrNull { File(it).exists() }
+                    ?: "/usr/local/bin/npx"
+
+                println("   Using npx at: $npxPath")
+
+                val githubMcpConfig = listOf(
+                    ru.dikoresearch.infrastructure.mcp.StdioMcpService.ServerConfig(
+                        name = "github",
+                        command = npxPath,
+                        args = listOf(
+                            "-y",
+                            "@modelcontextprotocol/server-github"
+                        ),
+                        envVars = mapOf(
+                            "GITHUB_PERSONAL_ACCESS_TOKEN" to config.githubToken
+                        )
+                    )
+                )
+                val service = ru.dikoresearch.infrastructure.mcp.StdioMcpService(githubMcpConfig)
+                runBlocking { service.initialize() }
+                println("   ✅ GitHub MCP Service инициализирован")
+                service
+            } catch (e: Exception) {
+                println("   ⚠️ GitHub MCP Service недоступен: ${e.message}")
+                e.printStackTrace()
+                null
+            }
+        } else {
+            println("   ⚠️ GitHub токен не настроен в config.properties (github.token)")
+            println("   Добавьте GitHub токен для использования /showPR команды")
+            null
+        }
+        println()
+
         // 8. Создание Domain Layer
         println("8. Создание ChatOrchestrator...")
         val chatOrchestrator = ChatOrchestrator(
@@ -248,7 +289,9 @@ fun main() {
             embeddingsManager = embeddingsManager,
             textChunker = textChunker,
             ollamaClient = ollamaClient,
+            gigaChatClient = gigaClient,
             gitMcpService = gitMcpService,
+            githubMcpService = githubMcpService,
             applicationScope = applicationScope,
             defaultSystemRole = AssistantRole,
             defaultTemperature = 0.87F,
