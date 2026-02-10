@@ -292,6 +292,8 @@ fun main() {
             gigaChatClient = gigaClient,
             gitMcpService = gitMcpService,
             githubMcpService = githubMcpService,
+            githubOwner = config.githubOwner,
+            githubRepo = config.githubRepo,
             applicationScope = applicationScope,
             defaultSystemRole = AssistantRole,
             defaultTemperature = 0.87F,

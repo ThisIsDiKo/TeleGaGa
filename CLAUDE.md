@@ -15,7 +15,7 @@ The bot maintains conversation history with automatic summarization when the his
 
 ### MCP Integration
 
-The bot supports **function calling** through **4 MCP servers** via two protocols:
+The bot supports **function calling** through **5 MCP servers** via two protocols:
 
 #### HTTP MCP Servers (Node.js)
 - **get_weather** - Get current weather for any city using wttr.in (mcp-weather-server, port 3001)
@@ -24,7 +24,7 @@ The bot supports **function calling** through **4 MCP servers** via two protocol
 - **delete_reminder** - Mark reminders as completed (mcp-reminders-server, port 3002)
 - **get_chuck_norris_joke** - Get Chuck Norris jokes (English, LLM translates to Russian) (mcp-chuck-server, port 3003)
 
-#### Stdio MCP Servers (Python)
+#### Stdio MCP Servers (Python/Node.js)
 - **compose_create** - Create Docker Compose configuration for applications (mcp-server-docker)
 - **compose_spec** - Show current Docker Compose configuration (mcp-server-docker)
 - **compose_apply** - Apply Docker Compose configuration (start containers) (mcp-server-docker)
@@ -32,6 +32,25 @@ The bot supports **function calling** through **4 MCP servers** via two protocol
 - **docker_ps** - Show running Docker containers (mcp-server-docker)
 - **docker_images** - Show available Docker images (mcp-server-docker)
 - **docker_logs** - Show container logs (mcp-server-docker)
+
+#### GitHub MCP Server (Node.js - Stdio)
+- **26 GitHub tools** including:
+  - **get_pull_request** - Get PR details
+  - **list_pull_requests** - List PRs with filters
+  - **get_pull_request_files** - Get list of files changed in PR (with patches)
+  - **create_pull_request_review** - Create code review
+  - **merge_pull_request** - Merge PR
+  - **get_file_contents** - Get file contents from repository
+  - **create_issue**, **list_issues**, **update_issue** - Issue management
+  - **search_code**, **search_issues**, **search_repositories** - Search operations
+  - And more... (see `/listGitHubTools` command)
+
+**GitHub MCP Architecture**:
+- Uses official `@modelcontextprotocol/server-github` npm package
+- Communicates via JSON-RPC over stdin/stdout
+- Requires GitHub Personal Access Token (configured in config.properties)
+- Auto-started by bot via npx
+- **Powers `/showPR` command** for AI-powered Pull Request analysis
 
 **Architecture**:
 - HTTP servers run on localhost (ports 3001-3003), auto-started by bot, using Streamable HTTP protocol (MCP 2024-11-05)
@@ -180,6 +199,22 @@ See [MCP_INTEGRATION.md](MCP_INTEGRATION.md) for detailed documentation.
 - **`/enableMcp`** - Activates MCP mode (only needed for existing chats; new chats have MCP by default)
 - **`/listTools`** - Shows available MCP tools
 
+### GitHub Commands
+- **`/showPR [number]`** - **NEW (Day 22)** Analyze Pull Request with AI-powered code review
+  - Without number: analyzes latest open PR
+  - With number: analyzes specific PR (e.g., `/showPR 1`)
+  - **Multi-stage analysis**:
+    1. Fetches PR metadata (title, description, author, modified files)
+    2. Performs RAG analysis using project documentation
+    3. Gets diff using GitHub MCP (`get_pull_request_files`)
+    4. Chunks large diffs (max 3000 chars per chunk)
+    5. Analyzes each chunk with GigaChat (temperature 0.3)
+    6. Synthesizes final report with issues categorized by severity
+  - **Review criteria**: code quality, security, best practices, bugs, performance
+  - **Output**: Structured report with critical/medium/low severity issues
+  - **Requires**: GitHub token in `config.properties` (see [GITHUB_MCP_SETUP.md](docs/GITHUB_MCP_SETUP.md))
+- **`/listGitHubTools`** - **NEW** Shows all 26 available GitHub MCP tools
+
 ### RAG Commands
 - `/createEmbeddings` - Creates embeddings from rag_docs/readme.md using Ollama (nomic-embed-text)
 - `/testRag <question>` - Compares answers with RAG and without RAG
@@ -191,11 +226,24 @@ See [MCP_INTEGRATION.md](MCP_INTEGRATION.md) for detailed documentation.
 
 ## Configuration
 
-Authentication tokens and API keys must be set in Main.kt:
-```kotlin
-val telegramToken = "" // Line 53
-val gigaAuthKey = "" // Line 55
+Authentication tokens and API keys are configured in `config.properties`:
+
+```properties
+# Telegram Bot
+telegram.token=YOUR_TELEGRAM_BOT_TOKEN
+
+# GigaChat AI
+gigachat.model=GigaChat
+gigachat.baseUrl=https://gigachat.devices.sberbank.ru
+gigachat.authKey=YOUR_GIGACHAT_AUTH_KEY
+
+# GitHub Integration (optional, for /showPR command)
+github.token=ghp_YOUR_GITHUB_TOKEN
+github.owner=YourGitHubUsername
+github.repo=YourRepositoryName
 ```
+
+**GitHub Setup**: See [docs/GITHUB_MCP_SETUP.md](docs/GITHUB_MCP_SETUP.md) for detailed instructions on creating Personal Access Token and configuration.
 
 Default settings:
 - GigaChat model: "GigaChat"
@@ -240,6 +288,16 @@ Four predefined system prompts are defined in Main.kt:
   - User-configurable threshold via `/setThreshold` command
   - Filtering adds < 10ms overhead
   - Persistent threshold storage per chat
+- **PR Analysis (Day 22)**:
+  - GitHub MCP integration via `@modelcontextprotocol/server-github` (Node.js, stdio)
+  - Intelligent diff chunking - splits large PRs into 3000-char chunks to fit GigaChat context
+  - Multi-stage analysis: PR metadata → RAG context → diff fetching → chunked analysis → synthesis
+  - Uses `get_pull_request_files` MCP tool (returns patches for each file)
+  - Structured code review with severity levels (high/medium/low)
+  - Categories: security, bugs, quality, performance
+  - Low temperature (0.3) for consistent analysis
+  - Handles PRs with 50+ files through automatic chunking
+  - See [docs/DIFF_PROCESSING_STRATEGY.md](docs/DIFF_PROCESSING_STRATEGY.md) and [docs/PR_ANALYSIS_ARCHITECTURE.md](docs/PR_ANALYSIS_ARCHITECTURE.md)
 
 ## Dependencies
 
@@ -261,7 +319,9 @@ cd mcp-chuck-server && npm install
 ```
 Servers are auto-started by the bot on ports 3001-3003.
 
-### Stdio MCP Server (Python - Docker)
+### Stdio MCP Servers (Python/Node.js)
+
+#### Docker MCP Server (Python)
 Install Docker MCP server via pipx:
 ```bash
 brew install pipx  # If not installed
@@ -273,6 +333,29 @@ pipx ensurepath
 - Docker Desktop must be installed and running
 - Docker socket must be accessible at default location
 - Python 3.12+ required for mcp-server-docker
+
+#### GitHub MCP Server (Node.js)
+GitHub MCP server is **automatically installed and started** by the bot via npx. No manual installation needed!
+
+**Requirements**:
+- Node.js v16+ with npx
+- GitHub Personal Access Token in `config.properties`
+
+**Setup Guide**: See [docs/GITHUB_MCP_SETUP.md](docs/GITHUB_MCP_SETUP.md) for:
+- Creating GitHub Personal Access Token
+- Required token scopes (public_repo or repo)
+- Configuring `github.token`, `github.owner`, `github.repo`
+- Troubleshooting common issues
+
+**GitHub MCP provides 26 tools**:
+- Pull request operations (list, get details, get files/diff, create review, merge)
+- Issue management (create, list, update, add comments)
+- File operations (get contents, create/update files, push multiple files)
+- Repository operations (create, fork, create branch)
+- Search operations (code, issues, users, repositories)
+- And more...
+
+Run `/listGitHubTools` in Telegram to see all available tools.
 
 ## Testing MCP Integration
 
@@ -290,7 +373,7 @@ pipx ensurepath
    ```
 
 3. Send `/start` to get command list
-4. Send `/listTools` to see all 12 MCP tools
+4. Send `/listTools` to see all MCP tools (Docker + Git)
 5. Test HTTP MCP tools:
    - Weather: "Какая погода в Санкт-Петербурге?"
    - Reminders: "Напомни мне завтра в 10:00 позвонить маме"
@@ -299,6 +382,11 @@ pipx ensurepath
    - Start Caddy: "Запусти Caddy сервер"
    - Check containers: "Покажи запущенные контейнеры"
    - Stop Caddy: "Останови Caddy"
+7. Test GitHub MCP tools (requires configuration):
+   - List tools: `/listGitHubTools`
+   - Analyze PR: `/showPR` or `/showPR 1`
+   - Expected: Multi-stage analysis with progress messages
+   - Expected: Final report with code review findings
 
 Note: For existing chats created before this change, use `/enableMcp` to activate MCP tools, or `/clearChat` to start fresh.
 
@@ -310,12 +398,34 @@ Note: For existing chats created before this change, use `/enableMcp` to activat
 - Verify npm dependencies are installed in each mcp-*-server directory
 - MCP server logs appear in console during bot startup
 
-### Stdio MCP Server (Docker)
+### Stdio MCP Servers
+
+#### Docker MCP Server
 - Ensure Docker Desktop is running (`docker ps` should work)
 - Verify mcp-server-docker is installed: `which mcp-server-docker`
 - Check pipx installation: `pipx list | grep mcp-server-docker`
 - Docker socket location: `/var/run/docker.sock` or `~/.docker/run/docker.sock`
 - If Docker tools fail, check bot console for Python traceback
+
+#### GitHub MCP Server
+- **Error: "GitHub MCP service is not available"**
+  - Check Node.js/npx is installed: `node --version`, `npx --version`
+  - Verify GitHub token in `config.properties`
+  - Check bot console for npm/GitHub MCP initialization errors
+- **Error: "GitHub owner and repo not configured"**
+  - Add `github.owner` and `github.repo` to `config.properties`
+  - Restart bot after configuration changes
+- **Error: "Not Found: Resource not found"**
+  - Verify owner/repo are correct (case-sensitive)
+  - Check PR number exists: `https://github.com/owner/repo/pulls`
+- **Error: "Forbidden" or "401"**
+  - Token invalid or expired - regenerate token
+  - Check token scopes: need `public_repo` or `repo`
+- **Analysis takes too long or times out**
+  - Normal for large PRs (20+ files can take 2-5 minutes)
+  - Check GigaChat API is responding
+  - Verify network connectivity
+- **Detailed troubleshooting**: See [docs/GITHUB_MCP_SETUP.md](docs/GITHUB_MCP_SETUP.md)
 
 ### General
 - Use `/listTools` to verify servers are running (should show 12 tools total)

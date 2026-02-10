@@ -44,6 +44,8 @@ class TelegramBotService(
     private val gigaChatClient: ru.dikoresearch.infrastructure.http.GigaChatClient,
     private val gitMcpService: ru.dikoresearch.infrastructure.mcp.StdioMcpService,
     private val githubMcpService: ru.dikoresearch.infrastructure.mcp.StdioMcpService?,
+    private val githubOwner: String?,
+    private val githubRepo: String?,
     private val applicationScope: CoroutineScope,
     private val defaultSystemRole: String,
     private val defaultTemperature: Float,
@@ -179,6 +181,7 @@ class TelegramBotService(
                     appendLine()
                     appendLine("🔧 GitHub Commands:")
                     appendLine("/showPR [number] - Analyze Pull Request with RAG + GigaChat")
+                    appendLine("/listGitHubTools - Show available GitHub MCP tools")
                     appendLine()
                     appendLine("💡 Requirements:")
                     appendLine("• Ollama must be running: ollama pull nomic-embed-text")
@@ -1054,6 +1057,41 @@ Question: $query
             }
         }
 
+        command("listGitHubTools") {
+            val chatId = message.chat.id
+
+            if (githubMcpService == null || !githubMcpService.isAvailable()) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = "GitHub MCP service is not available."
+                )
+                return@command
+            }
+
+            applicationScope.launch {
+                try {
+                    val tools = githubMcpService.listTools()
+                    val toolsList = tools.joinToString("\n") { tool ->
+                        "- ${tool.name}: ${tool.description}"
+                    }
+
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = """
+                            Available GitHub MCP Tools (${tools.size}):
+
+                            $toolsList
+                        """.trimIndent()
+                    )
+                } catch (e: Exception) {
+                    bot.sendMessage(
+                        chatId = ChatId.fromId(chatId),
+                        text = "Error listing tools: ${e.message}"
+                    )
+                }
+            }
+        }
+
         command("showPR") {
             val chatId = message.chat.id
             val prNumberArg = args.firstOrNull()
@@ -1076,6 +1114,23 @@ Question: $query
                         Token scopes needed:
                         - public_repo (for public repos)
                         - repo (for private repos)
+                    """.trimIndent()
+                )
+                return@command
+            }
+
+            // Check if owner and repo are configured
+            if (githubOwner.isNullOrBlank() || githubRepo.isNullOrBlank()) {
+                bot.sendMessage(
+                    chatId = ChatId.fromId(chatId),
+                    text = """
+                        GitHub owner and repo not configured.
+
+                        Please add to config.properties:
+                        github.owner=your_username
+                        github.repo=your_repo
+
+                        Then restart the bot.
                     """.trimIndent()
                 )
                 return@command
@@ -1373,15 +1428,17 @@ Question: $query
      * Get latest open Pull Request using GitHub MCP
      */
     private suspend fun getLatestOpenPullRequest(): PullRequestInfo? {
-        if (githubMcpService == null) return null
+        if (githubMcpService == null || githubOwner.isNullOrBlank() || githubRepo.isNullOrBlank()) {
+            return null
+        }
 
         return try {
             // List open PRs
             val result = githubMcpService.callTool(
                 name = "list_pull_requests",
                 args = mapOf(
-                    "owner" to (settingsManager.loadSettings(0).ragRelevanceThreshold.toString()), // Placeholder
-                    "repo" to "TeleGaGa",
+                    "owner" to githubOwner,
+                    "repo" to githubRepo,
                     "state" to "open"
                 )
             )
@@ -1390,6 +1447,7 @@ Question: $query
             parsePullRequestFromList(result)
         } catch (e: Exception) {
             println("Error fetching PRs: ${e.message}")
+            e.printStackTrace()
             null
         }
     }
@@ -1398,14 +1456,16 @@ Question: $query
      * Get Pull Request by number using GitHub MCP
      */
     private suspend fun getPullRequestByNumber(number: Int): PullRequestInfo? {
-        if (githubMcpService == null) return null
+        if (githubMcpService == null || githubOwner.isNullOrBlank() || githubRepo.isNullOrBlank()) {
+            return null
+        }
 
         return try {
             val result = githubMcpService.callTool(
                 name = "get_pull_request",
                 args = mapOf(
-                    "owner" to "placeholder",
-                    "repo" to "TeleGaGa",
+                    "owner" to githubOwner,
+                    "repo" to githubRepo,
                     "pull_number" to number
                 )
             )
@@ -1413,30 +1473,67 @@ Question: $query
             parsePullRequest(result)
         } catch (e: Exception) {
             println("Error fetching PR #$number: ${e.message}")
+            e.printStackTrace()
             null
         }
     }
 
     /**
-     * Get Pull Request diff using GitHub MCP
+     * Get Pull Request diff using GitHub MCP tool: get_pull_request_files
+     * This returns list of files with their patches, which we combine into unified diff
      */
     private suspend fun getPullRequestDiff(number: Int): String {
-        if (githubMcpService == null) return ""
+        if (githubMcpService == null || githubOwner.isNullOrBlank() || githubRepo.isNullOrBlank()) {
+            return ""
+        }
 
         return try {
+            // Use GitHub MCP tool to get PR files
             val result = githubMcpService.callTool(
-                name = "get_pull_request_diff",
+                name = "get_pull_request_files",
                 args = mapOf(
-                    "owner" to "placeholder",
-                    "repo" to "TeleGaGa",
+                    "owner" to githubOwner,
+                    "repo" to githubRepo,
                     "pull_number" to number
                 )
             )
 
-            // Extract text from result
-            result.content.firstOrNull()?.text ?: ""
+            // Parse result and extract patches
+            val text = result.content.firstOrNull()?.text ?: return ""
+            val json = Json { ignoreUnknownKeys = true }
+            val filesArray = json.parseToJsonElement(text).jsonArray
+
+            // Combine all patches into unified diff format
+            buildString {
+                filesArray.forEach { fileElement ->
+                    val fileObj = fileElement.jsonObject
+                    val filename = fileObj["filename"]?.jsonPrimitive?.content ?: return@forEach
+                    val patch = fileObj["patch"]?.jsonPrimitive?.content
+                    val status = fileObj["status"]?.jsonPrimitive?.content ?: "modified"
+
+                    // If file has a patch (not binary, not too large)
+                    if (patch != null) {
+                        // Add git-style header
+                        appendLine("diff --git a/$filename b/$filename")
+                        when (status) {
+                            "added" -> appendLine("new file mode 100644")
+                            "removed" -> appendLine("deleted file mode 100644")
+                        }
+                        appendLine("--- a/$filename")
+                        appendLine("+++ b/$filename")
+                        appendLine(patch)
+                        appendLine()
+                    } else {
+                        // File without patch (binary or too large)
+                        appendLine("diff --git a/$filename b/$filename")
+                        appendLine("Binary files differ or file too large")
+                        appendLine()
+                    }
+                }
+            }
         } catch (e: Exception) {
-            println("Error fetching PR diff #$number: ${e.message}")
+            println("Error fetching PR files #$number: ${e.message}")
+            e.printStackTrace()
             ""
         }
     }
