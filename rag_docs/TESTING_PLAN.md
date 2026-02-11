@@ -1,37 +1,37 @@
-# План Тестирования TeleGaGa Bot
+# TeleGaGa Bot Testing Plan
 
-## 1. Подготовка к Тестированию
+## 1. Preparation for Testing
 
-### 1.1 Запуск с чистого состояния
+### 1.1 Starting from Clean State
 ```bash
-# Очистить все данные
+# Clear all data
 rm -rf chat_history/
 rm -rf chat_settings/
 rm -rf mcp-reminders-server/reminders.json
 
-# Пересобрать проект
+# Rebuild the project
 ./gradlew clean build
 
-# Запустить бота
+# Start the bot
 ./gradlew run
 ```
 
-### 1.2 Что смотреть в логах при старте
+### 1.2 What to Check in Logs at Startup
 ```
-✅ Проверить:
-[x] "=== Запуск TeleGaGa бота ==="
-[x] "Конфигурация загружена успешно"
-[x] "HTTP клиент создан"
-[x] "GigaChat клиент создан"
-[x] "🧹 Очистка портов от старых процессов..." (для портов 3001, 3002, 3003)
+✅ Check for:
+[x] "=== Starting TeleGaGa bot ==="
+[x] "Configuration loaded successfully"
+[x] "HTTP client created"
+[x] "GigaChat client created"
+[x] "🧹 Cleaning ports from old processes..." (for ports 3001, 3002, 3003)
 [x] "✅ weather: X tools on port 3001"
 [x] "✅ reminders: X tools on port 3002"
 [x] "✅ chuck: X tools on port 3003"
-[x] "✅ Все MCP серверы запущены и подключены"
-[x] "🕐 ReminderScheduler запущен"
-[x] "Telegram бот запущен и ожидает сообщений"
+[x] "✅ All MCP servers started and connected"
+[x] "🕐 ReminderScheduler started"
+[x] "Telegram bot started and waiting for messages"
 
-❌ НЕ должно быть:
+❌ Should NOT see:
 [ ] "EADDRINUSE: address already in use"
 [ ] "Failed to initialize"
 [ ] "processesAlive=false"
@@ -39,28 +39,28 @@ rm -rf mcp-reminders-server/reminders.json
 
 ---
 
-## 2. Тестирование Базовых Команд
+## 2. Testing Basic Commands
 
-### Тест 2.1: /start
-**Сообщение боту:** `/start`
+### Test 2.1: /start
+**Message to bot:** `/start`
 
-**Ожидаемый результат:**
-- Приветственное сообщение
-- Список всех команд
-- Секция "MCP инструменты"
-- Секция "Управление напоминаниями"
+**Expected result:**
+- Welcome message
+- List of all commands
+- "MCP tools" section
+- "Reminders management" section
 
-**Что смотреть в логах:**
-- Нет ошибок при обработке команды
+**What to check in logs:**
+- No errors during command processing
 
 ---
 
-### Тест 2.2: /listTools
-**Сообщение боту:** `/listTools`
+### Test 2.2: /listTools
+**Message to bot:** `/listTools`
 
-**Ожидаемый результат:**
+**Expected result:**
 ```
-Доступные MCP инструменты (5):
+Available MCP tools (5):
 • get_weather
 • create_reminder
 • get_reminders
@@ -68,153 +68,153 @@ rm -rf mcp-reminders-server/reminders.json
 • get_chuck_norris_joke
 ```
 
-**Что смотреть в логах:**
+**What to check in logs:**
 - `🔍 HttpMcpService.isAvailable(): sessions=true (3), processesAlive=true (3), result=true`
 
 ---
 
-### Тест 2.3: /changeT
-**Сообщение боту:** `/changeT 0.5`
+### Test 2.3: /changeT
+**Message to bot:** `/changeT 0.5`
 
-**Ожидаемый результат:**
-- "Новая температура ответов: 0.5"
+**Expected result:**
+- "New response temperature: 0.5"
 
-**Проверка:** Задать вопрос и посмотреть в логах токены - должно быть `temperature=0.5`
-
----
-
-### Тест 2.4: /clearChat
-**Сообщение боту:** `/clearChat`
-
-**Ожидаемый результат:**
-- "История чата успешно удалена"
-
-**Проверка:** Файл в `chat_history/<chatId>_history.json` должен исчезнуть
+**Verification:** Ask a question and check tokens in logs - should see `temperature=0.5`
 
 ---
 
-## 3. Тестирование MCP: Погода
+### Test 2.4: /clearChat
+**Message to bot:** `/clearChat`
 
-### Тест 3.1: Простой запрос погоды
-**Сообщение боту:** `Какая погода в Санкт-Петербурге?`
+**Expected result:**
+- "Chat history successfully deleted"
 
-**Ожидаемый результат:**
-- Ответ с температурой, описанием, влажностью, ветром
-- Информация о токенах в конце
+**Verification:** File in `chat_history/<chatId>_history.json` should disappear
 
-**Что смотреть в логах:**
+---
+
+## 3. Testing MCP: Weather
+
+### Test 3.1: Simple Weather Request
+**Message to bot:** `What's the weather in Saint Petersburg?`
+
+**Expected result:**
+- Response with temperature, description, humidity, wind
+- Token information at the end
+
+**What to check in logs:**
 ```bash
-# Должны быть строки:
-📤 Вызов gigaClient.chatCompletion (functions=5)...
-Модель запросила вызов функции: get_weather
-✅ MCP функции получены: 5 шт.
+# Should see lines:
+📤 Calling gigaClient.chatCompletion (functions=5)...
+Model requested function call: get_weather
+✅ MCP functions retrieved: 5 items
 ```
 
-**Проверка функции:**
+**Function verification:**
 ```
 GigaChatFunctionCall(
   name=get_weather,
-  arguments={"city":"Санкт-Петербург","lang":"ru"}
+  arguments={"city":"Saint Petersburg","lang":"en"}
 )
 ```
 
 ---
 
-### Тест 3.2: Погода для нескольких городов
-**Сообщение боту:** `Сравни погоду в Москве и Питере`
+### Test 3.2: Weather for Multiple Cities
+**Message to bot:** `Compare weather in Moscow and Saint Petersburg`
 
-**Ожидаемый результат:**
-- Два вызова get_weather
-- Сравнительный анализ от LLM
+**Expected result:**
+- Two get_weather calls
+- Comparative analysis from LLM
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-🔄 Итерация 1: отправка запроса в GigaChat...
-Модель запросила вызов функции: get_weather
-🔄 Итерация 2: отправка запроса в GigaChat...
-Модель запросила вызов функции: get_weather
-🔄 Итерация 3: отправка запроса в GigaChat...
+🔄 Iteration 1: sending request to GigaChat...
+Model requested function call: get_weather
+🔄 Iteration 2: sending request to GigaChat...
+Model requested function call: get_weather
+🔄 Iteration 3: sending request to GigaChat...
 ```
 
 ---
 
-### Тест 3.3: Погода для несуществующего города
-**Сообщение боту:** `Какая погода в Атлантиде?`
+### Test 3.3: Weather for Non-existent City
+**Message to bot:** `What's the weather in Atlantis?`
 
-**Ожидаемый результат:**
-- Корректная обработка ошибки
-- LLM должна сообщить, что город не найден
+**Expected result:**
+- Proper error handling
+- LLM should inform that city was not found
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
 GigaChatMessage(role=function, content={"error": "..."})
 ```
 
 ---
 
-## 4. Тестирование MCP: Напоминания
+## 4. Testing MCP: Reminders
 
-### Тест 4.1: Создание напоминания на конкретную дату
-**Сообщение боту:** `Напомни мне послезавтра в 15:00 сдать отчёт`
+### Test 4.1: Creating Reminder for Specific Date
+**Message to bot:** `Remind me the day after tomorrow at 15:00 to submit the report`
 
-**Ожидаемый результат:**
-- Подтверждение создания напоминания
-- Указание конкретной даты
+**Expected result:**
+- Confirmation of reminder creation
+- Specific date indicated
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```bash
-# Проверить что dueDate корректный (послезавтра от текущей даты):
+# Check that dueDate is correct (day after tomorrow from current date):
 GigaChatFunctionCall(
   name=create_reminder,
   arguments={
     "chatId":"...",
-    "dueDate":"2026-01-31",  # должна быть корректная дата
-    "text":"В 15:00 сдать отчёт"
+    "dueDate":"2026-01-31",  # should be correct date
+    "text":"At 15:00 submit the report"
   }
 )
 ```
 
-**Проверка файла:**
+**File verification:**
 ```bash
 cat mcp-reminders-server/reminders.json
-# Должен содержать новое напоминание с правильной датой
+# Should contain new reminder with correct date
 ```
 
 ---
 
-### Тест 4.2: Создание напоминания с относительной датой
-**Сообщение боту:** `Напомни мне завтра купить молоко`
+### Test 4.2: Creating Reminder with Relative Date
+**Message to bot:** `Remind me tomorrow to buy milk`
 
-**Ожидаемый результат:**
-- LLM должна вычислить "завтра" относительно текущей даты (из системного промпта)
+**Expected result:**
+- LLM should calculate "tomorrow" relative to current date (from system prompt)
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```bash
-# В начале обработки должен быть контекст:
-🔧 Добавляем контекст в системный промпт...
-ТЕКУЩАЯ ДАТА И ВРЕМЯ (timezone: Europe/Moscow):
-- Дата: 2026-01-29 (среда)
-- Время: 15:30:00
+# At the beginning of processing should see context:
+🔧 Adding context to system prompt...
+CURRENT DATE AND TIME (timezone: Europe/Moscow):
+- Date: 2026-01-29 (Wednesday)
+- Time: 15:30:00
 
-# Затем проверить что "завтра" = 2026-01-30:
+# Then check that "tomorrow" = 2026-01-30:
 GigaChatFunctionCall(
   name=create_reminder,
-  arguments={"chatId":"...","dueDate":"2026-01-30","text":"купить молоко"}
+  arguments={"chatId":"...","dueDate":"2026-01-30","text":"buy milk"}
 )
 ```
 
 ---
 
-### Тест 4.3: Получение списка напоминаний
-**Сообщение боту:** `Что у меня на завтра?`
+### Test 4.3: Getting List of Reminders
+**Message to bot:** `What do I have for tomorrow?`
 
-**Ожидаемый результат:**
-- Список всех напоминаний на завтрашнюю дату
-- Пронумерованный список с эмодзи
+**Expected result:**
+- List of all reminders for tomorrow's date
+- Numbered list with emojis
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-Модель запросила вызов функции: get_reminders
+Model requested function call: get_reminders
 GigaChatFunctionCall(
   name=get_reminders,
   arguments={"chatId":"...","startDate":"2026-01-30","endDate":"2026-01-30"}
@@ -223,119 +223,119 @@ GigaChatFunctionCall(
 
 ---
 
-### Тест 4.4: Удаление напоминания
-**Предварительно:** Создать напоминание
+### Test 4.4: Deleting Reminder
+**Prerequisites:** Create a reminder
 
-**Сообщение боту:** `Удали напоминание про молоко`
+**Message to bot:** `Delete the reminder about milk`
 
-**Ожидаемый результат:**
-- Подтверждение удаления
+**Expected result:**
+- Deletion confirmation
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-Модель запросила вызов функции: delete_reminder
+Model requested function call: delete_reminder
 ```
 
-**Проверка файла:**
+**File verification:**
 ```bash
 cat mcp-reminders-server/reminders.json
-# Напоминание должно иметь completed: true
+# Reminder should have completed: true
 ```
 
 ---
 
-### Тест 4.5: Напоминание "сегодня" (регрессионный тест)
-**Сообщение боту:** `Напомни мне сегодня в 23:00 посмотреть футбол`
+### Test 4.5: "Today" Reminder (Regression Test)
+**Message to bot:** `Remind me today at 23:00 to watch football`
 
-**Ожидаемый результат:**
-- dueDate должен быть СЕГОДНЯШНЕЙ датой, а не вчерашней
+**Expected result:**
+- dueDate should be TODAY's date, not yesterday's
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```bash
-# Проверить что dueDate = сегодняшняя дата из системного промпта
+# Check that dueDate = today's date from system prompt
 GigaChatFunctionCall(
   name=create_reminder,
   arguments={
-    "dueDate":"2026-01-29",  # СЕГОДНЯ, не 2026-01-28!
-    "text":"В 23:00 посмотреть футбол"
+    "dueDate":"2026-01-29",  # TODAY, not 2026-01-28!
+    "text":"At 23:00 watch football"
   }
 )
 ```
 
 ---
 
-## 5. Тестирование MCP: Шутки про Чака
+## 5. Testing MCP: Chuck Norris Jokes
 
-### Тест 5.1: Запрос шутки
-**Сообщение боту:** `Расскажи шутку про Чака Норриса`
+### Test 5.1: Joke Request
+**Message to bot:** `Tell me a Chuck Norris joke`
 
-**Ожидаемый результат:**
-- Шутка на русском языке (НЕ на английском!)
-- Должен быть юмор и естественный перевод
+**Expected result:**
+- Joke in Russian (NOT in English!)
+- Should have humor and natural translation
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```bash
-Модель запросила вызов функции: get_chuck_norris_joke
+Model requested function call: get_chuck_norris_joke
 
-# В ответе от MCP будет английский текст:
+# MCP response will be in English:
 GigaChatMessage(
   role=function,
   content="{\"joke\":\"Chuck Norris can divide by zero.\"}"
 )
 
-# Но LLM должна перевести в финальном ответе
+# But LLM should translate in final response
 ```
 
-**Проверка:** В ответе пользователю НЕ должно быть английского текста
+**Verification:** Response to user should NOT contain English text
 
 ---
 
-## 6. Тестирование Комплексных Сценариев
+## 6. Testing Complex Scenarios
 
-### Тест 6.1: Цепочка MCP вызовов
-**Сообщение боту:** `Напомни мне завтра в 10:00 проверить погоду в Москве и потом расскажи шутку`
+### Test 6.1: Chain of MCP Calls
+**Message to bot:** `Remind me tomorrow at 10:00 to check weather in Moscow and then tell me a joke`
 
-**Ожидаемый результат:**
-- create_reminder вызван
-- get_chuck_norris_joke вызван
-- Шутка переведена на русский
+**Expected result:**
+- create_reminder called
+- get_chuck_norris_joke called
+- Joke translated to Russian
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-🔄 Итерация 1: отправка запроса в GigaChat...
-Модель запросила вызов функции: create_reminder
-🔄 Итерация 2: отправка запроса в GigaChat...
-Модель запросила вызов функции: get_chuck_norris_joke
-🔄 Итерация 3: отправка запроса в GigaChat...
-(финальный ответ)
+🔄 Iteration 1: sending request to GigaChat...
+Model requested function call: create_reminder
+🔄 Iteration 2: sending request to GigaChat...
+Model requested function call: get_chuck_norris_joke
+🔄 Iteration 3: sending request to GigaChat...
+(final response)
 ```
 
 ---
 
-### Тест 6.2: Напоминание + Проверка + Удаление
-**Шаг 1:** `Напомни мне завтра купить хлеб`
-**Шаг 2:** `Что у меня на завтра?`
-**Шаг 3:** `Удали напоминание про хлеб`
-**Шаг 4:** `Что у меня на завтра?`
+### Test 6.2: Reminder + Check + Delete
+**Step 1:** `Remind me tomorrow to buy bread`
+**Step 2:** `What do I have for tomorrow?`
+**Step 3:** `Delete the reminder about bread`
+**Step 4:** `What do I have for tomorrow?`
 
-**Ожидаемый результат:**
-- Шаг 2: Должен показать напоминание про хлеб
-- Шаг 4: Должен сказать что дел нет (или показать другие дела)
+**Expected result:**
+- Step 2: Should show reminder about bread
+- Step 4: Should say there are no tasks (or show other tasks)
 
 ---
 
-## 7. Тестирование Scheduler'а
+## 7. Testing Scheduler
 
-### Тест 7.1: Настройка времени напоминаний
-**Сообщение боту:** `/setReminderTime 09:00`
+### Test 7.1: Setting Reminder Time
+**Message to bot:** `/setReminderTime 09:00`
 
-**Ожидаемый результат:**
-- "⏰ Напоминания будут приходить ежедневно в 09:00"
+**Expected result:**
+- "⏰ Reminders will arrive daily at 09:00"
 
-**Проверка файла:**
+**File verification:**
 ```bash
 cat chat_settings/<chatId>_settings.json
-# Должно быть:
+# Should be:
 {
   "chatId": ...,
   "temperature": 0.87,
@@ -347,40 +347,40 @@ cat chat_settings/<chatId>_settings.json
 
 ---
 
-### Тест 7.2: Симуляция утреннего напоминания
-**Подготовка:**
-1. Создать несколько напоминаний на сегодня
-2. Установить reminderTime на текущее время +2 минуты
+### Test 7.2: Simulating Morning Reminder
+**Preparation:**
+1. Create several reminders for today
+2. Set reminderTime to current time +2 minutes
 
-**Что должно произойти через 2 минуты:**
-- Сообщение от бота с:
-  - "🌅 Доброе утро! Вот твои дела на сегодня:"
-  - Список напоминаний (пронумерованный)
-  - "🌤️ Погода в Санкт-Петербурге:" + данные погоды
-  - "😄 Шутка дня от Чака Норриса:" + переведенная шутка
+**What should happen in 2 minutes:**
+- Message from bot with:
+  - "🌅 Good morning! Here are your tasks for today:"
+  - List of reminders (numbered)
+  - "🌤️ Weather in Saint Petersburg:" + weather data
+  - "😄 Joke of the day from Chuck Norris:" + translated joke
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```bash
-# Через каждую минуту НЕ должно быть логов (мы их удалили)
+# Every minute should NOT have logs (we removed them)
 
-# Когда сработает напоминание:
-✅ Отправка напоминаний для чата <chatId>
-📤 Отправка напоминаний для чата <chatId>
+# When reminder triggers:
+✅ Sending reminders for chat <chatId>
+📤 Sending reminders for chat <chatId>
 
-# Должны быть 3 запроса к GigaChat:
-📤 Вызов gigaClient.chatCompletion (functions=5)...  # get_reminders
-📤 Вызов gigaClient.chatCompletion (functions=5)...  # get_weather
-📤 Вызов gigaClient.chatCompletion (functions=5)...  # get_chuck_norris_joke
+# Should see 3 requests to GigaChat:
+📤 Calling gigaClient.chatCompletion (functions=5)...  # get_reminders
+📤 Calling gigaClient.chatCompletion (functions=5)...  # get_weather
+📤 Calling gigaClient.chatCompletion (functions=5)...  # get_chuck_norris_joke
 
-# НЕ должно быть:
+# Should NOT see:
 ❌ Request timeout has expired
 ❌ processesAlive=false
 ```
 
-**Проверка файла после отправки:**
+**File verification after sending:**
 ```bash
 cat chat_settings/<chatId>_settings.json
-# lastReminderSent должен обновиться:
+# lastReminderSent should be updated:
 {
   ...
   "lastReminderSent": "2026-01-29T09:00:35.123456"
@@ -389,179 +389,179 @@ cat chat_settings/<chatId>_settings.json
 
 ---
 
-### Тест 7.3: Отключение напоминаний
-**Сообщение боту:** `/disableReminders`
+### Test 7.3: Disabling Reminders
+**Message to bot:** `/disableReminders`
 
-**Ожидаемый результат:**
-- "🔕 Автоматические напоминания отключены"
+**Expected result:**
+- "🔕 Automatic reminders disabled"
 
-**Проверка:** Даже если reminderTime совпадет с текущим временем, сообщение НЕ должно прийти
+**Verification:** Even if reminderTime matches current time, message should NOT arrive
 
 ---
 
-## 8. Тестирование Edge Cases
+## 8. Testing Edge Cases
 
-### Тест 8.1: Очень длинный ответ
-**Сообщение боту:** `Напиши подробную статью про квантовые компьютеры на 5000 слов`
+### Test 8.1: Very Long Response
+**Message to bot:** `Write a detailed article about quantum computers with 5000 words`
 
-**Ожидаемый результат:**
-- Ответ обрезан до 3800 символов
-- В конце "..."
+**Expected result:**
+- Response truncated to 3800 characters
+- "..." at the end
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-# Если response.length > 3800:
+# If response.length > 3800:
 val truncatedText = if (fullResponse.length > 3800) {
 ```
 
 ---
 
-### Тест 8.2: Суммаризация истории
-**Подготовка:** Отправить 25+ сообщений (больше 20)
+### Test 8.2: History Summarization
+**Preparation:** Send 25+ messages (more than 20)
 
-**Ожидаемый результат после 21-го сообщения:**
-- Дополнительное сообщение "Диалог из 10 сообщений, выполнена суммаризация..."
+**Expected result after 21st message:**
+- Additional message "Dialog of 10 messages, summarization performed..."
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
-Запускаем процесс суммаризации для чата <chatId>
-Получена суммаризация: ...
+Starting summarization process for chat <chatId>
+Received summarization: ...
 ```
 
-**Проверка файла:**
+**File verification:**
 ```bash
 cat chat_history/<chatId>_history.json
-# Должно остаться только системное сообщение с контекстом:
+# Should only have system message with context:
 [
   {
     "role": "system",
-    "content": "...\nПредыдущий контекст:\n<суммаризация>"
+    "content": "...\nPrevious context:\n<summary>"
   }
 ]
 ```
 
 ---
 
-### Тест 8.3: MCP сервер недоступен (симуляция сбоя)
-**Подготовка:**
+### Test 8.3: MCP Server Unavailable (Failure Simulation)
+**Preparation:**
 ```bash
-# Убить один из MCP процессов
+# Kill one of the MCP processes
 lsof -ti:3001 | xargs kill -9
 ```
 
-**Сообщение боту:** `Какая погода в Москве?`
+**Message to bot:** `What's the weather in Moscow?`
 
-**Ожидаемый результат:**
-- Ошибка или объяснение что сервис недоступен
+**Expected result:**
+- Error or explanation that service is unavailable
 
-**Что смотреть в логах:**
+**What to check in logs:**
 ```
 🔍 HttpMcpService.isAvailable(): sessions=true (3), processesAlive=false (2), result=false
 ```
 
 ---
 
-## 9. Тестирование Ошибок
+## 9. Testing Errors
 
-### Тест 9.1: Неверный формат команды
-**Сообщение боту:** `/changeT abc`
+### Test 9.1: Invalid Command Format
+**Message to bot:** `/changeT abc`
 
-**Ожидаемый результат:**
-- "Температура должна быть числом от 0.0 до 1.0"
-
----
-
-### Тест 9.2: Неверный формат времени
-**Сообщение боту:** `/setReminderTime 25:00`
-
-**Ожидаемый результат:**
-- "❌ Неверный формат времени. Используйте HH:mm (например, 09:00)"
+**Expected result:**
+- "Temperature must be a number from 0.0 to 1.0"
 
 ---
 
-### Тест 9.3: GigaChat недоступен (симуляция)
-**Подготовка:** Временно изменить authorizationKey на неверный
+### Test 9.2: Invalid Time Format
+**Message to bot:** `/setReminderTime 25:00`
 
-**Сообщение боту:** `Привет`
+**Expected result:**
+- "❌ Invalid time format. Use HH:mm (e.g., 09:00)"
 
-**Ожидаемый результат:**
-- "Произошла ошибка при обработке сообщения: ..."
+---
 
-**Что смотреть в логах:**
+### Test 9.3: GigaChat Unavailable (Simulation)
+**Preparation:** Temporarily change authorizationKey to incorrect value
+
+**Message to bot:** `Hello`
+
+**Expected result:**
+- "An error occurred while processing the message: ..."
+
+**What to check in logs:**
 ```
 GigaChat error: ...
-Ошибка при обработке сообщения от чата <chatId>: ...
+Error processing message from chat <chatId>: ...
 ```
 
 ---
 
-## 10. Чек-лист Финальной Проверки
+## 10. Final Verification Checklist
 
-### Перед релизом проверить:
+### Before Release Check:
 
-- [ ] Все 5 MCP инструментов доступны (/listTools)
-- [ ] Процессы MCP серверов живы (проверить в логах при старте)
-- [ ] Погода работает для разных городов
-- [ ] Напоминания создаются с правильной датой (регрессионный тест "сегодня")
-- [ ] Напоминания можно получить и удалить
-- [ ] Шутки про Чака переводятся на русский
-- [ ] Scheduler отправляет утренние сообщения с погодой + шуткой
-- [ ] Нет visual MCP markers в ответах бота
-- [ ] Нет спама в логах от scheduler'а каждую минуту
-- [ ] Таймауты настроены (60 секунд для HTTP запросов)
-- [ ] История суммаризируется после 20 сообщений
-- [ ] Команды /changeRole, /changeT, /clearChat работают
-- [ ] Ошибки обрабатываются корректно (неверный формат команд)
+- [ ] All 5 MCP tools available (/listTools)
+- [ ] MCP server processes are alive (check in startup logs)
+- [ ] Weather works for different cities
+- [ ] Reminders created with correct date (regression test "today")
+- [ ] Reminders can be retrieved and deleted
+- [ ] Chuck Norris jokes translated to Russian
+- [ ] Scheduler sends morning messages with weather + joke
+- [ ] No visual MCP markers in bot responses
+- [ ] No spam in logs from scheduler every minute
+- [ ] Timeouts configured (60 seconds for HTTP requests)
+- [ ] History summarized after 20 messages
+- [ ] Commands /changeRole, /changeT, /clearChat work
+- [ ] Errors handled correctly (invalid command formats)
 
 ---
 
-## 11. Утилиты для Debugging
+## 11. Debugging Utilities
 
-### Просмотр логов с фильтрацией
+### Viewing Logs with Filtering
 ```bash
-# Запустить бота и сохранять логи
+# Start bot and save logs
 ./gradlew run 2>&1 | tee bot.log
 
-# Фильтровать только MCP логи
+# Filter only MCP logs
 grep -E "(MCP|mcp|🔧|⚡|🔍)" bot.log
 
-# Фильтровать только tool calls
+# Filter only tool calls
 grep -E "(functionCall|function_call)" bot.log
 
-# Фильтровать scheduler
-grep -E "(Scheduler|напоминаний)" bot.log
+# Filter scheduler
+grep -E "(Scheduler|reminders)" bot.log
 
-# Фильтровать ошибки
+# Filter errors
 grep -E "(Error|error|❌|Exception)" bot.log
 ```
 
-### Мониторинг MCP процессов
+### Monitoring MCP Processes
 ```bash
-# Проверить что все 3 процесса живы
+# Check that all 3 processes are alive
 lsof -ti:3001 && echo "weather OK" || echo "weather DEAD"
 lsof -ti:3002 && echo "reminders OK" || echo "reminders DEAD"
 lsof -ti:3003 && echo "chuck OK" || echo "chuck DEAD"
 ```
 
-### Проверка данных
+### Data Verification
 ```bash
-# Посмотреть историю чата
+# View chat history
 cat chat_history/<chatId>_history.json | jq .
 
-# Посмотреть настройки чата
+# View chat settings
 cat chat_settings/<chatId>_settings.json | jq .
 
-# Посмотреть все напоминания
+# View all reminders
 cat mcp-reminders-server/reminders.json | jq .
 ```
 
-### Очистка для повторного теста
+### Cleanup for Repeat Testing
 ```bash
-# Удалить все данные
+# Delete all data
 rm -rf chat_history/ chat_settings/
 rm mcp-reminders-server/reminders.json
 
-# Убить все MCP процессы
+# Kill all MCP processes
 lsof -ti:3001 | xargs kill -9 2>/dev/null
 lsof -ti:3002 | xargs kill -9 2>/dev/null
 lsof -ti:3003 | xargs kill -9 2>/dev/null
@@ -569,31 +569,31 @@ lsof -ti:3003 | xargs kill -9 2>/dev/null
 
 ---
 
-## 12. Критерии Успешности Тестирования
+## 12. Testing Success Criteria
 
-### ✅ Все тесты пройдены если:
+### ✅ All tests passed if:
 
 1. **MCP Integration**
-   - Все 5 инструментов работают
-   - Function calling срабатывает автоматически (не текстом)
-   - Результаты MCP вызовов корректно обрабатываются
+   - All 5 tools work
+   - Function calling triggers automatically (not as text)
+   - MCP call results processed correctly
 
-2. **Логика напоминаний**
-   - Даты вычисляются правильно ("сегодня", "завтра", "послезавтра")
-   - Scheduler отправляет сообщения в нужное время
-   - Нет дубликатов (проверка lastReminderSent)
+2. **Reminders Logic**
+   - Dates calculated correctly ("today", "tomorrow", "day after tomorrow")
+   - Scheduler sends messages at correct time
+   - No duplicates (lastReminderSent check)
 
-3. **Стабильность**
-   - Нет утечек процессов (порты очищаются)
-   - Нет таймаутов при работе с погодой
-   - Graceful shutdown работает корректно
+3. **Stability**
+   - No process leaks (ports cleaned up)
+   - No timeouts when working with weather
+   - Graceful shutdown works correctly
 
 4. **UX**
-   - Нет визуальных MCP markers
-   - Нет спама в логах
-   - Ошибки обрабатываются gracefully
+   - No visual MCP markers
+   - No spam in logs
+   - Errors handled gracefully
 
 5. **Performance**
-   - Ответы приходят за разумное время (<10 сек для простых запросов)
-   - Суммаризация срабатывает автоматически
-   - Токены используются эффективно
+   - Responses arrive within reasonable time (<10 sec for simple requests)
+   - Summarization triggers automatically
+   - Tokens used efficiently

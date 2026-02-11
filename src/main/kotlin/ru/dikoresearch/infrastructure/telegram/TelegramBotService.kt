@@ -163,30 +163,34 @@ class TelegramBotService(
             bot.sendMessage(
                 chatId = ChatId.fromId(chatId),
                 text = buildString {
-                    appendLine("👋 Hello! I'm TeleGaGa bot with RAG support.")
+                    appendLine("👋 Hello! I'm TeleGaGa - a project expert bot with RAG support.")
                     appendLine()
-                    appendLine("🤖 AI Models:")
-                    appendLine("• GigaChat - main chat model (analysis & responses)")
-                    appendLine("• Ollama (nomic-embed-text) - local embeddings for RAG")
+                    appendLine("🧠 How I work:")
+                    appendLine("• Answer questions about the TeleGaGa project")
+                    appendLine("• Use RAG to search documentation")
+                    appendLine("• Save chat history separately for each chat")
+                    appendLine("• Provide accurate answers based on documentation")
                     appendLine()
-                    appendLine("📋 Chat Commands:")
+                    appendLine("💬 Just ask a question!")
+                    appendLine("Examples:")
+                    appendLine("• Which MCP servers are used?")
+                    appendLine("• How does RAG work in the project?")
+                    appendLine("• Where is temperature configured?")
+                    appendLine()
+                    appendLine("📋 Management Commands:")
                     appendLine("/changeRole <text> - change system prompt")
                     appendLine("/changeT <number> - change temperature (0.0-1.0)")
                     appendLine("/clearChat - clear chat history")
+                    appendLine("/setThreshold <0.0-1.0> - RAG relevance threshold")
                     appendLine()
-                    appendLine("🔍 RAG Commands:")
-                    appendLine("/help <question> - Ask questions about project (uses GigaChat + RAG)")
-                    appendLine("/createEmbeddings - create embeddings from all .md files in rag_docs/")
-                    appendLine("/setThreshold <0.0-1.0> - set relevance threshold for RAG")
-                    appendLine()
-                    appendLine("🔧 GitHub Commands:")
-                    appendLine("/showPR [number] - Analyze Pull Request with RAG + GigaChat")
-                    appendLine("/listGitHubTools - Show available GitHub MCP tools")
+                    appendLine("🔧 Additional Commands:")
+                    appendLine("/createEmbeddings - create embeddings from rag_docs/")
+                    appendLine("/showPR [number] - analyze Pull Request")
+                    appendLine("/help <question> - search documentation")
                     appendLine()
                     appendLine("💡 Requirements:")
-                    appendLine("• Ollama must be running: ollama pull nomic-embed-text")
-                    appendLine("• GigaChat API key configured")
-                    appendLine("• GitHub token in config.properties (for /showPR)")
+                    appendLine("• Ollama with nomic-embed-text model")
+                    appendLine("• Embeddings created via /createEmbeddings")
                 }
             )
         }
@@ -1006,23 +1010,12 @@ Question: $query
 
                     // Step 6: Format final response
                     val formattedAnswer = buildString {
-                        appendLine("━━━ PROJECT HELP (RAG) ━━━")
-                        appendLine()
-                        appendLine("🔍 Question: $question")
-                        appendLine()
-                        appendLine("📖 Answer:")
                         appendLine(answer)
                         appendLine()
-                        appendLine("━━━ SOURCES ━━━")
+                        appendLine("━━━ Sources ━━━")
                         searchResult.chunks.forEach { chunk ->
                             appendLine("• ${chunk.fileName} (lines ${chunk.startLine}-${chunk.endLine})")
                         }
-                        appendLine()
-                        appendLine("📊 Statistics:")
-                        appendLine("• Chunks found: ${searchResult.filteredCount}")
-                        appendLine("• Avg relevance: %.0f%%".format(searchResult.avgRelevance * 100))
-                        appendLine("• Threshold: ${settings.ragRelevanceThreshold}")
-                        appendLine("• Tokens used: ${usage.totalTokens}")
                     }
 
                     // Truncate if too long (Telegram limit: 4096 chars)
@@ -1292,115 +1285,95 @@ Question: $query
             val chatId = message.chat.id
             val userMessage = message.text ?: return@message
 
-            println("📨 Получено сообщение от чата $chatId: '$userMessage'")
+            println("📨 Message received from chat $chatId: '$userMessage'")
 
             // Используем applicationScope для обработки сообщения
             applicationScope.launch {
                 try {
-                    println("⚙️ Загрузка настроек для чата $chatId...")
-                    // Получаем температуру для чата из настроек
+                    println("⚙️ Loading settings for chat $chatId...")
+                    // Получаем настройки для чата
                     val settings = settingsManager.loadSettings(chatId)
                     val temperature = settings.temperature
-                    println("✅ Настройки загружены, температура: $temperature")
+                    println("✅ Settings loaded, temperature: $temperature")
 
-                    // Get Git MCP tools
-                    val gitTools = gitMcpService.listTools()
-                    val gitFunctions = convertMcpToolsToGigaChatFunctions(gitTools)
+                    // Step 1: Search RAG documentation
+                    println("🔍 Searching relevant documentation via RAG...")
+                    val ragService = ru.dikoresearch.domain.RagService(embeddingService)
 
-                    println("🔧 Git MCP tools available: ${gitFunctions.size}")
+                    val ragContext = try {
+                        val searchResult = ragService.findRelevantChunksAcrossAllFiles(
+                            question = userMessage,
+                            topK = 5,
+                            relevanceThreshold = settings.ragRelevanceThreshold
+                        )
 
-                    if (gitFunctions.isNotEmpty()) {
-                        println("🤖 Обработка сообщения через ChatOrchestrator с Git MCP function calling...")
+                        if (searchResult.chunks.isNotEmpty()) {
+                            println("✅ Found ${searchResult.chunks.size} relevant fragments (avg relevance: %.2f)".format(searchResult.avgRelevance))
+                            val context = ragService.formatContextForMultipleFiles(searchResult.chunks)
+                            println("📄 RAG context size: ${context.length} chars")
+                            println("📋 First 300 chars of context:")
+                            println(context.take(300))
+                            println("...")
+                            context
+                        } else {
+                            println("⚠️ No relevant documentation found")
+                            ""
+                        }
+                    } catch (e: Exception) {
+                        println("⚠️ RAG unavailable: ${e.message}")
+                        e.printStackTrace()
+                        ""
+                    }
 
-                        // Enhanced system role with git tools instructions
-                        val enhancedSystemRole = """
-                            $defaultSystemRole
+                    // Step 2: Prepare system role with RAG context
+                    val systemRoleWithRag = if (ragContext.isNotBlank()) {
+                        """
+                        You are a helpful assistant for the TeleGaGa project.
 
-                            IMPORTANT: You have access to Git tools for repository /Users/dmitriikonovalov/Documents/TeleGaGa.
+                        Below is documentation extracted from the project. You MUST use this information to answer questions.
 
-                            MANDATORY - Use git tools when user asks about:
-                            - branches (list/current) → CALL git_list_branches or git_show_current_branch
-                            - commits/history → CALL git_log
-                            - repository status/changes → CALL git_status
-                            - files in repository → CALL appropriate git tool
+                        DOCUMENTATION:
+                        $ragContext
 
-                            DO NOT just describe git commands - ALWAYS CALL the actual tool to get real data.
-                            Answer in English only.
+                        CRITICAL INSTRUCTIONS:
+                        1. Answer using ONLY the information from the documentation above
+                        2. If the answer is in the documentation, provide it with specific details
+                        3. Quote relevant parts when answering
+                        4. Do NOT say information is not available if it exists in documentation
+                        5. Answer in English
+                        6. Be specific and cite exact information from the fragments
                         """.trimIndent()
-
-                        // Process with function calling
-                        val (answer, usage, functionCalls) = chatOrchestrator.processMessageWithFunctionCalling(
-                            systemRole = enhancedSystemRole,
-                            userMessage = userMessage,
-                            temperature = temperature,
-                            model = gigaChatModel,
-                            functions = gitFunctions,
-                            functionExecutor = { functionName, args ->
-                                println("🔧 Executing git tool: $functionName with args: $args")
-                                val result = gitMcpService.callTool(functionName, args)
-                                val text = result.content.firstOrNull()?.text ?: result.toString()
-                                println("✅ Git tool result: ${text.take(200)}...")
-                                text
-                            },
-                            maxIterations = 3
-                        )
-
-                        println("✅ Получен ответ от ChatOrchestrator (${answer.length} символов)")
-                        if (functionCalls.isNotEmpty()) {
-                            println("🔧 Function calls used: ${functionCalls.joinToString(", ")}")
-                        }
-
-                        // Формируем ответ с информацией о токенах
-                        val fullResponse = buildString {
-                            appendLine(answer)
-                            appendLine()
-                            if (functionCalls.isNotEmpty()) {
-                                appendLine("🔧 Git tools used: ${functionCalls.joinToString(", ")}")
-                                appendLine()
-                            }
-                            appendLine("Отправлены токены: ${usage.promptTokens}")
-                            appendLine("Получены токены: ${usage.completionTokens}")
-                            appendLine("Оплачены токены: ${usage.totalTokens}")
-                        }
-
-                        // Отправляем основной ответ
-                        sendMessageSafely(chatId, fullResponse)
                     } else {
-                        // Fallback to simple message processing without git MCP
-                        println("🤖 Обработка сообщения через ChatOrchestrator (без Git MCP)...")
-                        val response = chatOrchestrator.processMessage(
-                            chatId = chatId,
-                            userMessage = userMessage,
-                            systemRole = defaultSystemRole,
-                            temperature = temperature,
-                            model = gigaChatModel
-                        )
-                        println("✅ Получен ответ от ChatOrchestrator (${response.text.length} символов)")
+                        defaultSystemRole
+                    }
 
-                        // Формируем ответ с информацией о токенах
-                        val fullResponse = buildString {
-                            appendLine(response.text)
-                            appendLine()
-                            appendLine("Отправлены токены: ${response.tokenUsage.promptTokens}")
-                            appendLine("Получены токены: ${response.tokenUsage.completionTokens}")
-                            appendLine("Оплачены токены: ${response.tokenUsage.totalTokens}")
-                        }
+                    println("📝 System prompt with RAG: ${systemRoleWithRag.length} chars")
 
-                        // Отправляем основной ответ
-                        sendMessageSafely(chatId, fullResponse)
+                    // Step 3: Process message through ChatOrchestrator (saves history)
+                    println("🤖 Processing message through ChatOrchestrator...")
+                    val response = chatOrchestrator.processMessage(
+                        chatId = chatId,
+                        userMessage = userMessage,
+                        systemRole = systemRoleWithRag,
+                        temperature = temperature,
+                        model = gigaChatModel
+                    )
+                    println("✅ Received response from ChatOrchestrator (${response.text.length} chars)")
 
-                        // Если была выполнена суммаризация, отправляем дополнительное сообщение
-                        response.summaryMessage?.let { summaryMsg ->
-                            sendMessageSafely(chatId, summaryMsg)
-                        }
+                    // Step 4: Send clean response (no token info, no formatting)
+                    sendMessageSafely(chatId, response.text)
+
+                    // If summarization happened, notify user
+                    response.summaryMessage?.let { summaryMsg ->
+                        sendMessageSafely(chatId, summaryMsg)
                     }
 
                 } catch (e: Exception) {
-                    println("❌ Ошибка при обработке сообщения от чата $chatId: ${e.message}")
+                    println("❌ Error processing message from chat $chatId: ${e.message}")
                     e.printStackTrace()
                     sendMessageSafely(
                         chatId,
-                        "Произошла ошибка при обработке сообщения: ${e.message}"
+                        "An error occurred while processing the message: ${e.message}"
                     )
                 }
             }

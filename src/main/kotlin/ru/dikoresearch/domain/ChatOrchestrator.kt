@@ -260,12 +260,26 @@ class ChatOrchestrator(
         // Получаем или создаем историю для текущего чата
         val history = loadOrCreateHistory(chatId, systemRole)
 
+        // ВАЖНО: Всегда обновляем системный промпт (первое сообщение)
+        // Это нужно для корректной работы RAG с новым контекстом
+        if (history.isNotEmpty() && history[0].role == "system") {
+            history[0] = GigaChatMessage(role = "system", content = systemRole)
+            println("✏️ Updated system prompt in history (${systemRole.length} chars)")
+        }
+
         // Добавляем сообщение пользователя в историю
         history.add(GigaChatMessage(role = "user", content = userMessage))
 
+        // Логируем все сообщения перед отправкой
+        println("📋 Sending ${history.size} messages to GigaChat:")
+        history.forEachIndexed { index, msg ->
+            val preview = msg.content.take(150).replace("\n", " ")
+            println("  [$index] ${msg.role}: $preview${if (msg.content.length > 150) "..." else ""}")
+        }
+
         // Получаем ответ от GigaChat (без MCP функций)
         val modelResponse = try {
-            println("📤 Вызов gigaClient.chatCompletion...")
+            println("📤 Calling gigaClient.chatCompletion...")
             gigaClient.chatCompletion(
                 model = model,
                 messages = history,

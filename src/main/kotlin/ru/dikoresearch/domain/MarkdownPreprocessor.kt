@@ -12,8 +12,11 @@ class MarkdownPreprocessor {
      * @return очищенный и разбитый на абзацы текст
      */
     fun preprocess(markdownText: String): String {
+        // 0. Удаляем некорректные символы, которые не могут быть закодированы в UTF-8
+        val sanitized = sanitizeText(markdownText)
+
         // 1. Удаляем код-блоки (тройные обратные кавычки)
-        val withoutCodeBlocks = removeCodeBlocks(markdownText)
+        val withoutCodeBlocks = removeCodeBlocks(sanitized)
 
         // 2. Удаляем инлайн код (одинарные обратные кавычки)
         val withoutInlineCode = removeInlineCode(withoutCodeBlocks)
@@ -23,6 +26,28 @@ class MarkdownPreprocessor {
 
         // 4. Объединяем обратно в текст с двойными переносами
         return paragraphs.joinToString("\n\n")
+    }
+
+    /**
+     * Очищает текст от некорректных символов, которые не могут быть закодированы в UTF-8
+     * Удаляет контрольные символы (кроме \n, \r, \t) и непечатные символы
+     */
+    private fun sanitizeText(text: String): String {
+        return buildString(text.length) {
+            for (char in text) {
+                when {
+                    // Разрешенные управляющие символы
+                    char == '\n' || char == '\r' || char == '\t' -> append(char)
+                    // Удаляем контрольные символы (0x00-0x1F, 0x7F-0x9F)
+                    char.code < 0x20 -> continue
+                    char.code in 0x7F..0x9F -> continue
+                    // Удаляем некорректные суррогаты
+                    char.isSurrogate() -> continue
+                    // Остальные символы разрешены
+                    else -> append(char)
+                }
+            }
+        }
     }
 
     /**

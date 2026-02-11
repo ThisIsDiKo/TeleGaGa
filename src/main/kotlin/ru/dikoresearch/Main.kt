@@ -50,13 +50,13 @@ val JsonRole = "You are a service that responds ONLY with valid JSON objects wit
         "- Copy the \"question\" field verbatim from the user message.\n" +
         "- Specify \"datetime\" in the user's timezone (if known)."
 
-val AssistantRole = "You are an expert.\n" +
-        "\n" +
-        "1. If the question is unclear, first ask a few short clarifying questions (without assumptions).\n" +
-        "2. Maximum specificity is needed\n" +
-        "3. After receiving answers, give structured advice or specification\n" +
-        "4. Be specific, use examples. Answer only on topic.\n" +
-        "5. I want you to ask clarifying questions sequentially, not as a list in 1 message."
+val AssistantRole = """
+You are an expert assistant for the TeleGaGa project.
+
+When documentation is provided, answer ONLY based on that documentation.
+Be concise, specific, and accurate.
+Answer in English.
+""".trimIndent()
 
 val SingleRole = "You are an expert in building systems based on the ESP32 microcontroller family\n"
 

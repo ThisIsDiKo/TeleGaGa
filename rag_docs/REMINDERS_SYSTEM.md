@@ -1,26 +1,26 @@
-# Система напоминаний TeleGaGa
+# TeleGaGa Reminders System
 
-Полнофункциональная система управления напоминаниями с автоматической ежедневной отправкой через Telegram.
+Full-featured reminder management system with automatic daily delivery via Telegram.
 
-## Архитектура
+## Architecture
 
-### 1. MCP Сервер напоминаний (Node.js)
-**Расположение:** `mcp-reminders-server/`
+### 1. MCP Reminders Server (Node.js)
+**Location:** `mcp-reminders-server/`
 
-Предоставляет 3 MCP инструмента для работы с напоминаниями:
-- `create_reminder` - создание нового напоминания
-- `get_reminders` - получение списка напоминаний за период
-- `delete_reminder` - удаление/завершение напоминания
+Provides 3 MCP tools for working with reminders:
+- `create_reminder` - create new reminder
+- `get_reminders` - get list of reminders for a period
+- `delete_reminder` - delete/complete reminder
 
-**Хранилище:** `mcp-reminders-server/storage/<chatId>.json`
-- Изоляция данных по chatId
-- Автоматическое создание файлов
-- Валидация всех параметров
+**Storage:** `mcp-reminders-server/storage/<chatId>.json`
+- Data isolation by chatId
+- Automatic file creation
+- Validation of all parameters
 
 ### 2. ChatSettingsManager (Kotlin)
-**Расположение:** `src/main/kotlin/ru/dikoresearch/infrastructure/persistence/ChatSettingsManager.kt`
+**Location:** `src/main/kotlin/ru/dikoresearch/infrastructure/persistence/ChatSettingsManager.kt`
 
-Персистентное хранилище настроек чата:
+Persistent storage for chat settings:
 ```kotlin
 data class ChatSettings(
     val chatId: Long,
@@ -31,207 +31,207 @@ data class ChatSettings(
 )
 ```
 
-**Хранилище:** `chat_settings/<chatId>_settings.json`
+**Storage:** `chat_settings/<chatId>_settings.json`
 
 ### 3. ReminderScheduler (Kotlin)
-**Расположение:** `src/main/kotlin/ru/dikoresearch/domain/ReminderScheduler.kt`
+**Location:** `src/main/kotlin/ru/dikoresearch/domain/ReminderScheduler.kt`
 
-Фоновый планировщик с ежеминутной проверкой:
-- Проверяет время отправки для всех активных чатов
-- Предотвращает повторную отправку в один день
-- Использует LLM + MCP для генерации сообщений
-- Автоматическая обработка ошибок
+Background scheduler with per-minute checking:
+- Checks send time for all active chats
+- Prevents duplicate sends on same day
+- Uses LLM + MCP to generate messages
+- Automatic error handling
 
-## Команды Telegram
+## Telegram Commands
 
 ### /setReminderTime HH:mm
-Настройка времени ежедневных напоминаний.
+Configure time for daily reminders.
 
-**Пример:**
+**Example:**
 ```
 /setReminderTime 09:00
 ```
 
-**Результат:**
-- Время напоминаний установлено
+**Result:**
+- Reminder time set
 - reminderEnabled = true
-- Готовность к автоматической отправке
+- Ready for automatic sending
 
 ### /disableReminders
-Отключение автоматических напоминаний.
+Disable automatic reminders.
 
-**Результат:**
+**Result:**
 - reminderEnabled = false
-- Напоминания не отправляются автоматически
-- Данные сохраняются
+- Reminders not sent automatically
+- Data preserved
 
 ### /enableMcp
-Включение MCP режима для работы с напоминаниями.
+Enable MCP mode for working with reminders.
 
-**Доступные операции:**
-- "Напомни мне завтра купить молоко"
-- "Что у меня на сегодня?"
-- "Удали напоминание про встречу"
+**Available operations:**
+- "Remind me tomorrow to buy milk"
+- "What do I have for today?"
+- "Delete the reminder about the meeting"
 
-## Рабочий процесс
+## Workflow
 
-### Создание напоминания
-1. Пользователь: "Напомни мне завтра купить молоко"
-2. LLM анализирует запрос
-3. LLM вызывает `create_reminder` через MCP
-4. MCP сервер создает напоминание в `storage/<chatId>.json`
-5. Ответ возвращается пользователю
+### Creating a Reminder
+1. User: "Remind me tomorrow to buy milk"
+2. LLM analyzes the request
+3. LLM calls `create_reminder` via MCP
+4. MCP server creates reminder in `storage/<chatId>.json`
+5. Response returned to user
 
-### Автоматическая отправка
-1. ReminderScheduler проверяет время каждую минуту
-2. Находит чаты с reminderTime = текущее время
-3. Проверяет что сегодня еще не отправляли
-4. Формирует промпт: "Используй get_reminders для получения дел на сегодня"
-5. ChatOrchestrator вызывает LLM с MCP
-6. LLM вызывает `get_reminders` через MCP
-7. MCP возвращает список напоминаний
-8. LLM форматирует красивое сообщение с эмодзи
-9. Отправка в Telegram: "🌅 Доброе утро! Вот твои дела..."
-10. Обновление lastReminderSent
+### Automatic Sending
+1. ReminderScheduler checks time every minute
+2. Finds chats with reminderTime = current time
+3. Checks that we haven't sent today already
+4. Forms prompt: "Use get_reminders to get tasks for today"
+5. ChatOrchestrator calls LLM with MCP
+6. LLM calls `get_reminders` via MCP
+7. MCP returns list of reminders
+8. LLM formats nice message with emojis
+9. Send to Telegram: "🌅 Good morning! Here are your tasks..."
+10. Update lastReminderSent
 
-## Безопасность
+## Security
 
-### Изоляция данных
-- Каждый chatId имеет собственный файл хранилища
-- MCP сервер проверяет chatId во всех операциях
-- Невозможен доступ к чужим напоминаниям
+### Data Isolation
+- Each chatId has its own storage file
+- MCP server checks chatId in all operations
+- No access to other users' reminders possible
 
-### Передача chatId
-В ChatOrchestrator перед MCP вызовами:
+### Passing chatId
+In ChatOrchestrator before MCP calls:
 ```kotlin
 val contextMessage = GigaChatMessage(
     role = "system",
-    content = "ВАЖНО: Твой chatId = $chatId. ВСЕГДА используй этот chatId..."
+    content = "IMPORTANT: Your chatId = $chatId. ALWAYS use this chatId..."
 )
 history.add(1, contextMessage)
 ```
 
-После обработки контекстное сообщение удаляется.
+After processing, the context message is removed.
 
-## Технические детали
+## Technical Details
 
-### Формат времени
-- Ввод: HH:mm (например, 09:00)
-- Валидация: регулярное выражение `^([01]\d|2[0-3]):([0-5]\d)$`
-- Timezone: системная зона сервера
+### Time Format
+- Input: HH:mm (e.g., 09:00)
+- Validation: regular expression `^([01]\d|2[0-3]):([0-5]\d)$`
+- Timezone: server system timezone
 
-### Формат даты напоминаний
+### Reminder Date Format
 - YYYY-MM-DD (ISO 8601)
-- Валидация в MCP сервере
+- Validation in MCP server
 
-### Ограничения
-- Проверка времени: раз в минуту
-- Максимум 5 итераций tool calling
-- Автоматическая отправка: один раз в день
+### Limitations
+- Time checking: once per minute
+- Maximum 5 tool calling iterations
+- Automatic sending: once per day
 
-## Примеры использования
+## Usage Examples
 
-### Настройка напоминаний
+### Setting Up Reminders
 ```
 1. /setReminderTime 09:00
 2. /enableMcp
-3. "Напомни мне завтра купить молоко"
-4. "Напомни мне в пятницу позвонить маме"
+3. "Remind me tomorrow to buy milk"
+4. "Remind me on Friday to call mom"
 ```
 
-### Просмотр напоминаний
+### Viewing Reminders
 ```
-"Что у меня на сегодня?"
-"Покажи мои дела на эту неделю"
-```
-
-### Управление
-```
-"Удали напоминание про молоко"
-/disableReminders  # отключить автоотправку
+"What do I have for today?"
+"Show my tasks for this week"
 ```
 
-## Структура файлов
+### Management
+```
+"Delete the reminder about milk"
+/disableReminders  # disable auto-send
+```
+
+## File Structure
 
 ```
 TeleGaGa/
 ├── mcp-reminders-server/
-│   ├── index.js                      # MCP сервер
+│   ├── index.js                      # MCP server
 │   ├── package.json
 │   ├── storage/
-│   │   └── <chatId>.json             # Напоминания
+│   │   └── <chatId>.json             # Reminders
 │   └── README.md
 │
 ├── chat_settings/
-│   └── <chatId>_settings.json        # Настройки чата
+│   └── <chatId>_settings.json        # Chat settings
 │
 ├── src/main/kotlin/ru/dikoresearch/
 │   ├── domain/
-│   │   ├── ReminderScheduler.kt      # Планировщик
-│   │   └── ChatOrchestrator.kt       # Обновлен для chatId
+│   │   ├── ReminderScheduler.kt      # Scheduler
+│   │   └── ChatOrchestrator.kt       # Updated for chatId
 │   │
 │   └── infrastructure/
 │       ├── persistence/
-│       │   └── ChatSettingsManager.kt # Менеджер настроек
+│       │   └── ChatSettingsManager.kt # Settings manager
 │       │
 │       └── telegram/
-│           └── TelegramBotService.kt  # Новые команды
+│           └── TelegramBotService.kt  # New commands
 │
-├── Main.kt                           # Интеграция всех компонентов
-└── REMINDERS_SYSTEM.md               # Эта документация
+├── Main.kt                           # Integration of all components
+└── REMINDERS_SYSTEM.md               # This documentation
 ```
 
-## Запуск и тестирование
+## Running and Testing
 
-### Компиляция
+### Compilation
 ```bash
 ./gradlew build
 ```
 
-### Запуск
+### Running
 ```bash
 ./gradlew run
 ```
 
-### Проверка MCP сервера
+### Checking MCP Server
 ```bash
 cd mcp-reminders-server
 npm install
-node index.js  # Ctrl+C для остановки
+node index.js  # Ctrl+C to stop
 ```
 
-### Логирование
-- `✅ MCP сервис инициализирован` - MCP готов
-- `🕐 ReminderScheduler запущен` - Планировщик активен
-- `📤 Отправка напоминаний для чата <id>` - Начало отправки
-- `✅ Напоминания отправлены для чата <id>` - Успешная отправка
-- `💾 Настройки сохранены для чата <id>` - Сохранение настроек
+### Logging
+- `✅ MCP service initialized` - MCP ready
+- `🕐 ReminderScheduler started` - Scheduler active
+- `📤 Sending reminders for chat <id>` - Start of sending
+- `✅ Reminders sent for chat <id>` - Successful send
+- `💾 Settings saved for chat <id>` - Settings saved
 
-## Миграция
+## Migration
 
-### Температура
-Температура была мигрирована из памяти (MutableMap) в ChatSettings:
-- Старый код: `chatTemperatures[chatId] = temp`
-- Новый код: `settingsManager.saveSettings(chatId, settings.copy(temperature = temp))`
+### Temperature
+Temperature was migrated from memory (MutableMap) to ChatSettings:
+- Old code: `chatTemperatures[chatId] = temp`
+- New code: `settingsManager.saveSettings(chatId, settings.copy(temperature = temp))`
 
-Преимущества:
-- Персистентность между перезапусками
-- Централизованное управление настройками
-- Подготовка к новым настройкам
+Benefits:
+- Persistence across restarts
+- Centralized settings management
+- Preparation for new settings
 
-## Решенные проблемы
+## Resolved Issues
 
-1. **Chuck Norris → Reminders**: Заменен тестовый MCP сервер на продуктовый
-2. **Температура в памяти**: Мигрирована в файловое хранилище
-3. **Безопасность chatId**: Автоматическая подстановка в контекст
-4. **bot приватный**: Сделан публичным для ReminderScheduler
+1. **Chuck Norris → Reminders**: Replaced test MCP server with production one
+2. **Temperature in memory**: Migrated to file storage
+3. **chatId security**: Automatic insertion into context
+4. **bot private**: Made public for ReminderScheduler
 
-## Дальнейшее развитие
+## Future Development
 
-Возможные улучшения:
-- [ ] Повторяющиеся напоминания (ежедневно, еженедельно)
-- [ ] Уведомления за N минут до события
-- [ ] Категории напоминаний
-- [ ] Экспорт/импорт напоминаний
-- [ ] Интеграция с календарями
-- [ ] Множественные времена отправки в день
+Possible improvements:
+- [ ] Recurring reminders (daily, weekly)
+- [ ] Notifications N minutes before event
+- [ ] Reminder categories
+- [ ] Export/import reminders
+- [ ] Calendar integrations
+- [ ] Multiple send times per day

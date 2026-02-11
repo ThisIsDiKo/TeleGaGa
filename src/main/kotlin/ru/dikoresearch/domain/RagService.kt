@@ -307,28 +307,14 @@ class RagService(
      */
     fun formatContextForMultipleFiles(chunks: List<ChunkWithSource>): String {
         return buildString {
-            appendLine("=== DOCUMENTATION FOR ANSWER ===")
-            appendLine()
-            appendLine("IMPORTANT:")
-            appendLine("- These fragments are relevant to the question")
-            appendLine("- MUST use information from them")
-            appendLine("- Each fact MUST have a citation in square brackets with quoted text")
-            appendLine()
-
             chunks.forEachIndexed { i, chunk ->
-                appendLine("--- Fragment ${i + 1} ---")
-                appendLine("Source: ${chunk.fileName}, lines ${chunk.startLine}-${chunk.endLine}")
-                appendLine("Relevance: %.1f%%".format(chunk.relevance * 100))
-                appendLine("Text to quote:")
+                appendLine("--- FRAGMENT ${i + 1} ---")
+                appendLine("Source: ${chunk.fileName} (lines ${chunk.startLine}-${chunk.endLine})")
+                appendLine("Relevance: ${(chunk.relevance * 100).toInt()}%")
+                appendLine()
                 appendLine(chunk.text)
                 appendLine()
             }
-
-            appendLine("=== INSTRUCTION ===")
-            appendLine("1. USE information from fragments above")
-            appendLine("2. ADD citation in square brackets [quoted text] after each fact")
-            appendLine("3. DO NOT write 'information not found' if it exists above")
-            appendLine("4. Answer in English language")
         }
     }
 
