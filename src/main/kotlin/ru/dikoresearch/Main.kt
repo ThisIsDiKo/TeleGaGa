@@ -1,392 +1,136 @@
 package ru.dikoresearch
 
-import io.ktor.client.*
-import io.ktor.client.engine.cio.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.plugins.logging.*
-import io.ktor.client.plugins.*
-import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import ru.dikoresearch.domain.ChatOrchestrator
-import ru.dikoresearch.domain.MarkdownPreprocessor
-import ru.dikoresearch.domain.TextChunker
-import ru.dikoresearch.infrastructure.config.ConfigService
-import ru.dikoresearch.infrastructure.embeddings.EmbeddingService
-import ru.dikoresearch.infrastructure.http.GigaChatClient
-import ru.dikoresearch.infrastructure.http.OllamaClient
-import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
-import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
-import ru.dikoresearch.infrastructure.persistence.EmbeddingsManager
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
+import org.koin.java.KoinJavaComponent.get
+import ru.dikoresearch.di.*
+import ru.dikoresearch.domain.mcp.McpService
+import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
-import java.io.File
-import java.security.cert.X509Certificate
-import javax.net.ssl.X509TrustManager
+import org.koin.core.qualifier.named
 
-// System prompts
-val JsonRole = "You are a service that responds ONLY with valid JSON objects without explanations or Markdown formatting.\n" +
-        "Always use exactly this format:\n" +
-        "\n" +
-        "{\n" +
-        "  \"datetime\": \"ISO 8601 string with request date and time, e.g. 2026-01-13T20:54:00+03:00\",\n" +
-        "  \"model\": \"string with the model name that was requested, e.g. GigaChat\",\n" +
-        "  \"question\": \"string with the original user question\",\n" +
-        "  \"answer\": \"string with the answer to the question\"\n" +
-        "}\n" +
-        "\n" +
-        "Requirements:\n" +
-        "- Do not add any text outside JSON.\n" +
-        "- Always fill all fields.\n" +
-        "- The datetime field should contain only date and time representation, no extra words\n" +
-        "- Copy the \"question\" field verbatim from the user message.\n" +
-        "- Specify \"datetime\" in the user's timezone (if known)."
-
-val AssistantRole = """
-You are an expert assistant for the TeleGaGa project.
-
-When documentation is provided, answer ONLY based on that documentation.
-Be concise, specific, and accurate.
-Answer in English.
-""".trimIndent()
-
-val SingleRole = "You are an expert in building systems based on the ESP32 microcontroller family\n"
-
-val McpEnabledRole = """
-Docker assistant. Call functions silently.
-
-For "start caddy":
-- Function: run_container
-- image: "caddy:latest"
-- name: "caddy"
-- ports: {"80": 80, "443": 443}
-- detach: true
-
-For "start nginx":
-- Function: run_container
-- image: "nginx:latest"
-- name: "nginx"
-- ports: {"80": 80}
-- detach: true
-
-DO NOT use command, environment, volumes.
-DO NOT use create_container or recreate_container.
-Only run_container!
-
-After start: ✅ Started
-""".trimIndent()
-
-val RagWithCitationsRole = """
-You are an AI assistant that answers questions ONLY based on the provided documentation fragments.
-Answer in English language only.
-
-MANDATORY RULES:
-
-1. USE ONLY PROVIDED FRAGMENTS
-   - If the answer is in a fragment - use it
-   - DO NOT ignore fragments
-
-2. EVERY FACT MUST HAVE A CITATION
-   - Citation format: [quoted text from source]
-   - Place the exact quoted text in square brackets after each fact
-   - Quote must be taken directly from the fragment
-
-3. FORBIDDEN:
-   - Answer without citations
-   - Invent facts
-   - Write "information not found" if it IS in the fragments
-
-CORRECT ANSWER EXAMPLES:
-
-Example 1:
-Question: "What is the weather tool?"
-Fragment: "get_weather - Get current weather for any city via wttr.in"
-Answer: "The weather tool gets current weather for any city [get_weather - Get current weather for any city via wttr.in]."
-
-Example 2:
-Question: "How many MCP servers are used?"
-Fragment: "TeleGaGa supports function calling through 5 MCP servers using two protocols"
-Answer: "The project uses 5 MCP servers with two protocols [TeleGaGa supports function calling through 5 MCP servers using two protocols]."
-
-Example 3:
-Question: "What models are used?"
-Fragment: "AI models: GigaChat, Ollama (llama3.2:3b, nomic-embed-text)"
-Answer: "The system uses GigaChat and Ollama models [AI models: GigaChat, Ollama (llama3.2:3b, nomic-embed-text)]."
-
-ALGORITHM:
-1. Read all provided fragments carefully
-2. Find relevant information
-3. Formulate clear answer in English
-4. Add citation in square brackets with EXACT text from fragment
-
-IMPORTANT: Always include citations in square brackets!
-""".trimIndent()
-
+/**
+ * Main entry point for TeleGaGa Telegram bot with Koin DI
+ * Refactored from 448 lines to <100 lines using dependency injection
+ */
 fun main() {
-    // ApplicationScope для управления корутинами всего приложения
-    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    println("=== Starting TeleGaGa Bot with Koin DI ===\n")
+
     var botService: TelegramBotService? = null
+    var healthCheckServer: io.ktor.server.engine.EmbeddedServer<*, *>? = null
 
     try {
-        println("=== Запуск TeleGaGa бота ===\n")
-
-        // 1. Загрузка конфигурации
-        println("1. Загрузка конфигурации...")
-        val config = ConfigService.load()
-        println("   Конфигурация загружена успешно")
-        println("   $config\n")
-
-        // 2. Создание HTTP Client
-        println("2. Создание HTTP клиента...")
-        val httpClient = createHttpClient()
-        println("   HTTP клиент создан\n")
-
-        // 3. Инициализация AI клиентов
-        println("3. Инициализация AI клиентов...")
-        val gigaClient = GigaChatClient(
-            httpClient = httpClient,
-            baseUrl = config.gigaChatBaseUrl,
-            authorizationKey = config.gigaChatAuthKey
-        )
-        val ollamaClient = OllamaClient(httpClient = httpClient)
-        println("   GigaChat клиент создан: ${config.gigaChatBaseUrl}")
-        println("   Ollama клиент создан\n")
-
-        // 4. Инициализация Persistence
-        println("4. Инициализация менеджера истории...")
-        val historyManager = ChatHistoryManager()
-        println("   ChatHistoryManager инициализирован\n")
-
-        // 5. Инициализация ChatSettingsManager
-        println("5. Инициализация ChatSettingsManager...")
-        val settingsManager = ChatSettingsManager()
-        println("   ChatSettingsManager инициализирован\n")
-
-        // 6. Инициализация RAG сервисов
-        println("6. Инициализация RAG сервисов...")
-        val markdownPreprocessor = MarkdownPreprocessor()
-        // Оптимизированные параметры для точного подбора фрагментов с цитатами
-        // chunkSize: 300 символов = более полные фрагменты для корректного цитирования
-        // overlap: 50 символов = ~17% (сохраняет контекст на границах)
-        val textChunker = TextChunker(chunkSize = 300, overlap = 50)
-        val embeddingService = EmbeddingService(
-            gigaChatClient = null, // GigaChat требует пакеты
-            ollamaClient = ollamaClient, // Используем Ollama (бесплатно)
-            textChunker = textChunker,
-            markdownPreprocessor = markdownPreprocessor,
-            batchSize = 15,
-            useOllama = true // По умолчанию используем Ollama
-        )
-        val embeddingsManager = EmbeddingsManager()
-
-        // Создаем папку для RAG документов
-        val ragDocsDir = File("rag_docs")
-        if (!ragDocsDir.exists()) {
-            ragDocsDir.mkdirs()
-            println("   📁 Создана папка rag_docs")
-        }
-        println("   ✅ RAG сервисы инициализированы (Ollama embeddings + Markdown preprocessor)\n")
-
-        // 7. Инициализация Git MCP Service
-        println("7. Инициализация Git MCP Service...")
-
-        // Find uvx in PATH or user's .local/bin
-        val uvxPath = System.getenv("PATH")?.split(":")
-            ?.map { "$it/uvx" }
-            ?.firstOrNull { File(it).exists() }
-            ?: "${System.getProperty("user.home")}/.local/bin/uvx"
-
-        println("   Using uvx at: $uvxPath")
-
-        val gitMcpService = try {
-            // Use absolute path to ensure git MCP works with correct repository
-            val projectPath = System.getProperty("user.dir")
-            println("   Project path: $projectPath")
-
-            val gitMcpConfig = listOf(
-                ru.dikoresearch.infrastructure.mcp.StdioMcpService.ServerConfig(
-                    name = "git",
-                    command = uvxPath,
-                    args = listOf("mcp-server-git", "--repository", projectPath)
-                )
+        // 1. Initialize Koin DI container
+        println("1. Initializing Koin DI container...")
+        startKoin {
+            modules(
+                configModule,
+                httpModule,
+                llmModule,
+                mcpModule,
+                persistenceModule,
+                domainModule,
+                commandModule,
+                telegramModule
             )
-            val service = ru.dikoresearch.infrastructure.mcp.StdioMcpService(gitMcpConfig)
-            runBlocking { service.initialize() }
-            println("   ✅ Git MCP Service инициализирован для репозитория: $projectPath")
-            service
-        } catch (e: Exception) {
-            println("   ⚠️ Git MCP Service недоступен (будет работать без git tools): ${e.message}")
-            e.printStackTrace()
-            // Create empty service
-            ru.dikoresearch.infrastructure.mcp.StdioMcpService(emptyList())
         }
-        println()
+        println("   ✅ Koin DI container initialized\n")
 
-        // 7.5. Инициализация GitHub MCP Service
-        println("7.5. Инициализация GitHub MCP Service...")
-        val githubMcpService = if (!config.githubToken.isNullOrBlank()) {
+        // 2. Initialize MCP services
+        println("2. Initializing MCP services...")
+        runBlocking {
+            // Git MCP (Docker)
+            val gitMcp: StdioMcpService = get(StdioMcpService::class.java, named("gitMcp"))
             try {
-                // Find npx in PATH
-                val npxPath = System.getenv("PATH")?.split(":")
-                    ?.map { "$it/npx" }
-                    ?.firstOrNull { File(it).exists() }
-                    ?: "/usr/local/bin/npx"
-
-                println("   Using npx at: $npxPath")
-
-                val githubMcpConfig = listOf(
-                    ru.dikoresearch.infrastructure.mcp.StdioMcpService.ServerConfig(
-                        name = "github",
-                        command = npxPath,
-                        args = listOf(
-                            "-y",
-                            "@modelcontextprotocol/server-github"
-                        ),
-                        envVars = mapOf(
-                            "GITHUB_PERSONAL_ACCESS_TOKEN" to config.githubToken
-                        )
-                    )
-                )
-                val service = ru.dikoresearch.infrastructure.mcp.StdioMcpService(githubMcpConfig)
-                runBlocking { service.initialize() }
-                println("   ✅ GitHub MCP Service инициализирован")
-                service
+                gitMcp.initialize()
+                println("   ✅ Git MCP Service initialized")
             } catch (e: Exception) {
-                println("   ⚠️ GitHub MCP Service недоступен: ${e.message}")
+                println("   ⚠️ Git MCP Service failed: ${e.message}")
                 e.printStackTrace()
-                null
             }
-        } else {
-            println("   ⚠️ GitHub токен не настроен в config.properties (github.token)")
-            println("   Добавьте GitHub токен для использования /showPR команды")
-            null
+
+            // GitHub MCP (optional)
+            val githubMcp: StdioMcpService? = get(StdioMcpService::class.java, named("githubMcp"))
+            if (githubMcp != null) {
+                try {
+                    githubMcp.initialize()
+                    println("   ✅ GitHub MCP Service initialized")
+                } catch (e: Exception) {
+                    println("   ⚠️ GitHub MCP Service failed: ${e.message}")
+                    e.printStackTrace()
+                }
+            } else {
+                println("   ⚠️ GitHub MCP Service not configured (missing github.token)")
+            }
         }
         println()
 
-        // 8. Создание Domain Layer
-        println("8. Создание ChatOrchestrator...")
-        val chatOrchestrator = ChatOrchestrator(
-            gigaClient = gigaClient,
-            historyManager = historyManager
-        )
-        println("   ChatOrchestrator создан\n")
+        // 3. Start Health Check Server
+        println("3. Starting Health Check server...")
+        healthCheckServer = startHealthCheckServer()
+        println("   ✅ Health Check server running on http://localhost:12222\n")
 
-        // 9. Создание Telegram Bot Service
-        println("9. Инициализация Telegram Bot Service...")
-        botService = TelegramBotService(
-            telegramToken = config.telegramToken,
-            chatOrchestrator = chatOrchestrator,
-            settingsManager = settingsManager,
-            embeddingService = embeddingService,
-            embeddingsManager = embeddingsManager,
-            textChunker = textChunker,
-            ollamaClient = ollamaClient,
-            gigaChatClient = gigaClient,
-            gitMcpService = gitMcpService,
-            githubMcpService = githubMcpService,
-            githubOwner = config.githubOwner,
-            githubRepo = config.githubRepo,
-            applicationScope = applicationScope,
-            defaultSystemRole = AssistantRole,
-            defaultTemperature = 0.87F,
-            gigaChatModel = config.gigaChatModel
-        )
-        println("   TelegramBotService создан\n")
+        // 4. Start Telegram Bot
+        println("4. Starting Telegram Bot...")
+        botService = get(TelegramBotService::class.java)
+        botService?.start()
+        println("   ✅ Telegram Bot started\n")
 
-        // 10. Запуск Health Check сервера
-        println("10. Запуск Health Check сервера...")
-        startHealthCheckServer()
-        println("   Health Check сервер запущен на http://localhost:12222\n")
+        println("=== TeleGaGa Bot is running ===")
+        println("Press Enter to stop (or Ctrl+C)\n")
 
-        // 11. Запуск Telegram бота
-        println("11. Запуск Telegram бота...")
-        botService.start()
-        println("   TelegramBot запущен\n")
-
-        println("=== TeleGaGa бот с RAG успешно запущен ===")
-        println("Для остановки нажмите Enter (или Ctrl+C)\n")
-
-        // Добавляем shutdown hook для корректного завершения при Ctrl+C
+        // Add shutdown hook for Ctrl+C
         Runtime.getRuntime().addShutdownHook(Thread {
-            println("\n(Получен сигнал завершения)")
+            println("\n(Received shutdown signal)")
         })
 
-        // Блокируем main поток до получения Enter
+        // Block main thread until Enter pressed
         val input = readLine()
         if (input == null) {
-            // Stdin закрыт (например, запуск из IDE), ждём бесконечно
-            println("⚠️ Stdin не доступен, используем Ctrl+C для остановки")
+            // Stdin closed (e.g., running from IDE), wait indefinitely
+            println("⚠️ Stdin not available, use Ctrl+C to stop")
             try {
                 while (true) {
                     Thread.sleep(1000)
                 }
             } catch (e: InterruptedException) {
-                println("\n⚠️ Получен сигнал прерывания")
+                println("\n⚠️ Received interrupt signal")
             }
         }
 
     } catch (e: Exception) {
         e.printStackTrace()
-        println("\nОшибка в приложении: ${e.message}")
+        println("\n❌ Application error: ${e.message}")
     } finally {
-        println("\n=== Начинается graceful shutdown ===")
+        println("\n=== Graceful shutdown ===")
 
-        // Отменяем все корутины в applicationScope
-        applicationScope.cancel()
-        println("ApplicationScope отменен")
-
-        // Останавливаем Telegram бота
+        // Stop Telegram bot
         botService?.stop()
+        println("✅ Telegram bot stopped")
 
-        println("=== Приложение завершено ===")
+        // Stop health check server
+        healthCheckServer?.stop(1000, 2000)
+        println("✅ Health check server stopped")
+
+        // Stop Koin
+        stopKoin()
+        println("✅ Koin DI container stopped")
+
+        println("=== Application terminated ===")
     }
 }
 
 /**
- * Создает HTTP клиент с отключенной проверкой SSL сертификатов
- * (требуется для работы с GigaChat из-за проблем с сертификатами)
+ * Starts health check HTTP server on port 12222
  */
-private fun createHttpClient(): HttpClient {
-    val json = Json { ignoreUnknownKeys = true }
-
-    return HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(json)
-        }
-        install(Logging)
-
-        // Увеличенные таймауты для работы с внешними API и RAG (qwen3 может быть медленным)
-        install(HttpTimeout) {
-            requestTimeoutMillis = 180000  // 3 минуты на весь запрос
-            connectTimeoutMillis = 10000   // 10 секунд на установку соединения
-            socketTimeoutMillis = 180000   // 3 минуты на чтение/запись
-        }
-
-        // Из-за проблем с сертификатами минцифры, пришлось отключить их проверку
-        engine {
-            https {
-                trustManager = object : X509TrustManager {
-                    override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                    override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-                }
-            }
-        }
-    }
-}
-
-/**
- * Запускает простой HTTP сервер для health check на порту 12222
- */
-private fun startHealthCheckServer() {
+private fun startHealthCheckServer() =
     embeddedServer(Netty, port = 12222) {
         routing {
             get("/") {
@@ -394,9 +138,3 @@ private fun startHealthCheckServer() {
             }
         }
     }.start(wait = false)
-}
-
-@Suppress("unused")
-fun Application.module() {
-    // Для совместимости с Ktor, если потребуется
-}

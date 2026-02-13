@@ -68,7 +68,12 @@ fun main(args: Array<String>) = runBlocking {
         val httpClient = createHttpClient()
 
         // Initialize Ollama client (verbose=false for clean CLI output)
-        val ollamaClient = OllamaClient(httpClient = httpClient, verbose = false)
+        val ollamaClient = OllamaClient(
+            httpClient = httpClient,
+            chatModel = "llama3.2:3b",
+            embeddingModel = "nomic-embed-text",
+            verbose = false
+        )
 
         // Initialize RAG services
         val markdownPreprocessor = MarkdownPreprocessor()

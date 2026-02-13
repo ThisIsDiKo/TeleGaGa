@@ -1,0 +1,27 @@
+# TeleGaGa Bot Configuration Template
+# Copy this file to config.properties and fill in your actual values
+
+# Telegram Bot Token (required)
+# Get from @BotFather on Telegram
+telegram.token=YOUR_TELEGRAM_BOT_TOKEN_HERE
+
+# GigaChat Configuration (required)
+gigachat.model=GigaChat
+gigachat.baseUrl=https://gigachat.devices.sberbank.ru
+gigachat.authKey=YOUR_GIGACHAT_AUTH_KEY_HERE
+
+# Ollama Configuration (for local LLM and embeddings)
+ollama.chatModel=llama3.2:3b
+ollama.embeddingModel=nomic-embed-text
+
+# GitHub Integration (optional, for /showPR command)
+# Create Personal Access Token at https://github.com/settings/tokens
+# Required scopes: public_repo (for public repos) or repo (for private repos)
+github.token=
+github.owner=
+github.repo=
+
+# Example with values:
+# github.token=ghp_your_token_here
+# github.owner=YourGitHubUsername
+# github.repo=YourRepositoryName

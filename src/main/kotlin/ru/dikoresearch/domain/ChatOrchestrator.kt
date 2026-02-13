@@ -5,15 +5,21 @@ import GigaChatFunctionCall
 import GigaChatMessage
 import Usage
 import kotlinx.serialization.json.*
-import ru.dikoresearch.infrastructure.http.GigaChatClient
+import ru.dikoresearch.domain.llm.LlmClient
+import ru.dikoresearch.domain.valueobjects.ChatId
+import ru.dikoresearch.domain.valueobjects.SystemPrompt
+import ru.dikoresearch.domain.valueobjects.Temperature
 import ru.dikoresearch.infrastructure.persistence.ChatHistoryManager
 
 /**
  * Оркестратор чат-логики - чистая бизнес-логика без зависимости от Telegram
  * Отвечает за обработку сообщений пользователя, управление историей и суммаризацию
+ *
+ * Теперь использует LlmClient interface вместо конкретной реализации GigaChatClient,
+ * что позволяет легко заменять LLM провайдера
  */
 class ChatOrchestrator(
-    private val gigaClient: GigaChatClient,
+    private val llmClient: LlmClient,
     private val historyManager: ChatHistoryManager
 ) {
     /**
@@ -26,21 +32,21 @@ class ChatOrchestrator(
      * @return пара из текста ответа и статистики использования токенов
      */
     suspend fun processMessageWithoutHistory(
-        systemRole: String,
+        systemRole: SystemPrompt,
         userMessage: String,
-        temperature: Float,
+        temperature: Temperature,
         model: String = "GigaChat"
     ): Pair<String, Usage> {
         val tempHistory = mutableListOf(
-            GigaChatMessage(role = "system", content = systemRole),
+            GigaChatMessage(role = "system", content = systemRole.value),
             GigaChatMessage(role = "user", content = userMessage)
         )
 
         val response = try {
-            gigaClient.chatCompletion(
+            llmClient.chatCompletion(
                 model = model,
                 messages = tempHistory,
-                temperature = temperature
+                temperature = temperature.value
             )
         } catch (e: Exception) {
             println("GigaChat error in processMessageWithoutHistory: ${e}")
@@ -64,16 +70,16 @@ class ChatOrchestrator(
      * @return тройка: (финальный ответ, usage, история вызовов функций)
      */
     suspend fun processMessageWithFunctionCalling(
-        systemRole: String,
+        systemRole: SystemPrompt,
         userMessage: String,
-        temperature: Float,
+        temperature: Temperature,
         model: String = "GigaChat",
         functions: List<GigaChatFunction>,
         functionExecutor: suspend (String, Map<String, Any>) -> String,
         maxIterations: Int = 5
     ): Triple<String, Usage, List<String>> {
         val history = mutableListOf(
-            GigaChatMessage(role = "system", content = systemRole),
+            GigaChatMessage(role = "system", content = systemRole.value),
             GigaChatMessage(role = "user", content = userMessage)
         )
 
@@ -84,8 +90,8 @@ class ChatOrchestrator(
         println("\n" + "=".repeat(80))
         println("📤 REQUEST TO GIGACHAT")
         println("=".repeat(80))
-        println("SYSTEM ROLE (${systemRole.length} chars):")
-        println(systemRole)
+        println("SYSTEM ROLE (${systemRole.value.length} chars):")
+        println(systemRole.value)
         println("\n${"-".repeat(80)}")
         println("USER MESSAGE (${userMessage.length} chars):")
         println(userMessage)
@@ -99,10 +105,10 @@ class ChatOrchestrator(
 
             // Make request with functions
             val response = try {
-                gigaClient.chatCompletion(
+                llmClient.chatCompletion(
                     model = model,
                     messages = history,
-                    temperature = temperature,
+                    temperature = temperature.value,
                     functions = functions,
                     functionCall = "auto"
                 )
@@ -251,20 +257,20 @@ class ChatOrchestrator(
      * @return ответ с текстом и информацией об использовании токенов
      */
     suspend fun processMessage(
-        chatId: Long,
+        chatId: ChatId,
         userMessage: String,
-        systemRole: String,
-        temperature: Float,
+        systemRole: SystemPrompt,
+        temperature: Temperature,
         model: String = "GigaChat"
     ): ChatResponse {
         // Получаем или создаем историю для текущего чата
-        val history = loadOrCreateHistory(chatId, systemRole)
+        val history = loadOrCreateHistory(chatId, systemRole.value)
 
         // ВАЖНО: Всегда обновляем системный промпт (первое сообщение)
         // Это нужно для корректной работы RAG с новым контекстом
         if (history.isNotEmpty() && history[0].role == "system") {
-            history[0] = GigaChatMessage(role = "system", content = systemRole)
-            println("✏️ Updated system prompt in history (${systemRole.length} chars)")
+            history[0] = GigaChatMessage(role = "system", content = systemRole.value)
+            println("✏️ Updated system prompt in history (${systemRole.value.length} chars)")
         }
 
         // Добавляем сообщение пользователя в историю
@@ -280,10 +286,10 @@ class ChatOrchestrator(
         // Получаем ответ от GigaChat (без MCP функций)
         val modelResponse = try {
             println("📤 Calling gigaClient.chatCompletion...")
-            gigaClient.chatCompletion(
+            llmClient.chatCompletion(
                 model = model,
                 messages = history,
-                temperature = temperature
+                temperature = temperature.value
             )
         } catch (e: Exception) {
             println("GigaChat error: ${e}")
@@ -299,11 +305,11 @@ class ChatOrchestrator(
         history.add(GigaChatMessage(role = "assistant", content = assistantMessage))
 
         // Сохраняем историю
-        historyManager.saveHistory(chatId, history)
+        historyManager.saveHistory(chatId.value, history)
 
         // Проверяем, нужна ли суммаризация
         val summaryMessage = if (history.size > 20) {
-            summarizeHistory(chatId, history, systemRole, model)
+            summarizeHistory(chatId.value, history, systemRole.value, model)
         } else {
             null
         }
@@ -331,8 +337,8 @@ class ChatOrchestrator(
     /**
      * Загружает существующую историю или создает новую с системным промптом
      */
-    private fun loadOrCreateHistory(chatId: Long, systemRole: String): MutableList<GigaChatMessage> {
-        val loadedHistory = historyManager.loadHistory(chatId)
+    private fun loadOrCreateHistory(chatId: ChatId, systemRole: String): MutableList<GigaChatMessage> {
+        val loadedHistory = historyManager.loadHistory(chatId.value)
         return if (loadedHistory.isNotEmpty()) {
             println("Загружена существующая история для чата $chatId")
             loadedHistory
@@ -367,7 +373,7 @@ class ChatOrchestrator(
         val summaryRequest = listOf(summarySystemPrompt, summaryUserPrompt)
 
         val modelAnswer = try {
-            gigaClient.chatCompletion(
+            llmClient.chatCompletion(
                 model = model,
                 messages = summaryRequest,
                 temperature = 0.0F
@@ -404,13 +410,13 @@ class ChatOrchestrator(
     /**
      * Обновляет системный промпт для указанного чата
      */
-    fun updateSystemRole(chatId: Long, newSystemRole: String) {
-        val history = historyManager.loadHistory(chatId).takeIf { it.isNotEmpty() }
-            ?: mutableListOf(GigaChatMessage(role = "system", content = newSystemRole))
+    fun updateSystemRole(chatId: ChatId, newSystemRole: SystemPrompt) {
+        val history = historyManager.loadHistory(chatId.value).takeIf { it.isNotEmpty() }
+            ?: mutableListOf(GigaChatMessage(role = "system", content = newSystemRole.value))
 
         // Обновляем системный промпт (первое сообщение в истории)
-        history[0] = GigaChatMessage(role = "system", content = newSystemRole)
-        historyManager.saveHistory(chatId, history)
+        history[0] = GigaChatMessage(role = "system", content = newSystemRole.value)
+        historyManager.saveHistory(chatId.value, history)
 
         println("Системный промпт обновлен для чата $chatId")
     }
@@ -418,8 +424,8 @@ class ChatOrchestrator(
     /**
      * Очищает историю для указанного чата
      */
-    fun clearHistory(chatId: Long): Boolean {
-        return historyManager.clearHistory(chatId)
+    fun clearHistory(chatId: ChatId): Boolean {
+        return historyManager.clearHistory(chatId.value)
     }
 }
 
@@ -429,7 +435,7 @@ class ChatOrchestrator(
 data class ChatResponse(
     val text: String,
     val tokenUsage: TokenUsage,
-    val temperature: Float,
+    val temperature: Temperature,
     val summaryMessage: String? = null,
     val toolsUsed: Boolean = false
 )

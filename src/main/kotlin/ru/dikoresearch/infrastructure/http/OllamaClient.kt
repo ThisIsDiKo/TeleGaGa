@@ -16,6 +16,8 @@ import kotlinx.serialization.json.Json
 
 class OllamaClient(
     private val httpClient: HttpClient,
+    private val chatModel: String,
+    private val embeddingModel: String,
     private val baseUrl: String = "http://localhost:11434",
     private val verbose: Boolean = false
 ) {
@@ -26,7 +28,7 @@ class OllamaClient(
     ): OllamaChatResponse {
 
         val requestBody = OllamaChatRequest(
-            model = "llama3.2:3b",
+            model = chatModel,
             messages = messages,
             stream = false
         )
@@ -65,12 +67,12 @@ class OllamaClient(
      * Ollama обрабатывает по одному тексту за раз, поэтому делаем батчинг здесь
      *
      * @param texts список текстов для обработки
-     * @param model модель для embeddings (рекомендуется "nomic-embed-text")
+     * @param model модель для embeddings
      * @return список пар (текст, embedding)
      */
     suspend fun embeddings(
         texts: List<String>,
-        model: String = "nomic-embed-text"
+        model: String = embeddingModel
     ): List<Pair<String, List<Float>>> {
         if (verbose) {
             println("📤 Ollama embeddings запрос для ${texts.size} текстов (модель: $model)")

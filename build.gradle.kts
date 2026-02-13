@@ -2,6 +2,7 @@ plugins {
     kotlin("jvm") version "2.2.10"
     application
     kotlin("plugin.serialization") version "2.2.10"
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 repositories {
@@ -28,6 +29,9 @@ dependencies {
     implementation("io.github.kotlin-telegram-bot.kotlin-telegram-bot:telegram:6.1.0")
 
     implementation("io.modelcontextprotocol:kotlin-sdk:0.8.3")
+
+    // Koin Dependency Injection
+    implementation("io.insert-koin:koin-core:3.5.3")
 }
 
 application {
@@ -45,4 +49,25 @@ tasks.register<JavaExec>("runCli") {
 
 kotlin {
     jvmToolchain(17)
+}
+
+// Shadow plugin configuration for fat JAR
+tasks {
+    shadowJar {
+        archiveBaseName.set("telegaga-bot")
+        archiveVersion.set("1.0.0")
+        archiveClassifier.set("")
+
+        // Merge service files (important for Ktor, Koin)
+        mergeServiceFiles()
+
+        manifest {
+            attributes["Main-Class"] = "ru.dikoresearch.MainKt"
+        }
+    }
+
+    // Make build depend on shadowJar
+    build {
+        dependsOn(shadowJar)
+    }
 }
