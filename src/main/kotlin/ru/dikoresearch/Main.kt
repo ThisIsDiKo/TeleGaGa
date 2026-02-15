@@ -1,17 +1,10 @@
 package ru.dikoresearch
 
-import io.ktor.server.application.*
-import io.ktor.server.engine.*
-import io.ktor.server.netty.*
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.java.KoinJavaComponent.get
 import ru.dikoresearch.di.*
-import ru.dikoresearch.domain.mcp.McpService
 import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 import org.koin.core.qualifier.named
@@ -24,7 +17,6 @@ fun main() {
     println("=== Starting TeleGaGa Bot with Koin DI ===\n")
 
     var botService: TelegramBotService? = null
-    var healthCheckServer: io.ktor.server.engine.EmbeddedServer<*, *>? = null
 
     try {
         // 1. Initialize Koin DI container
@@ -72,13 +64,8 @@ fun main() {
         }
         println()
 
-        // 3. Start Health Check Server
-        println("3. Starting Health Check server...")
-        healthCheckServer = startHealthCheckServer()
-        println("   ✅ Health Check server running on http://localhost:12222\n")
-
-        // 4. Start Telegram Bot
-        println("4. Starting Telegram Bot...")
+        // 3. Start Telegram Bot
+        println("3. Starting Telegram Bot...")
         botService = get(TelegramBotService::class.java)
         botService?.start()
         println("   ✅ Telegram Bot started\n")
@@ -115,10 +102,6 @@ fun main() {
         botService?.stop()
         println("✅ Telegram bot stopped")
 
-        // Stop health check server
-        healthCheckServer?.stop(1000, 2000)
-        println("✅ Health check server stopped")
-
         // Stop Koin
         stopKoin()
         println("✅ Koin DI container stopped")
@@ -126,15 +109,3 @@ fun main() {
         println("=== Application terminated ===")
     }
 }
-
-/**
- * Starts health check HTTP server on port 12222
- */
-private fun startHealthCheckServer() =
-    embeddedServer(Netty, port = 12222) {
-        routing {
-            get("/") {
-                call.respondText("Bot OK")
-            }
-        }
-    }.start(wait = false)

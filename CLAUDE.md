@@ -79,7 +79,6 @@ See [MCP_INTEGRATION.md](MCP_INTEGRATION.md) for detailed documentation.
   - Initializes HTTP client with SSL certificate verification disabled (required for GigaChat's certificate issues)
   - Sets up GigaChat and Ollama clients
   - Configures Telegram bot with command handlers
-  - Starts a health check server on port 12222
   - Manages conversation history with system prompts
 
 ### AI Clients
@@ -270,7 +269,6 @@ Four predefined system prompts are defined in Main.kt:
 - Token management uses Mutex for thread-safe access with automatic refresh
 - Conversation history is preserved and automatically summarized to maintain context
 - Responses are truncated to 3800 chars to fit Telegram's message limits
-- Health check endpoint at `http://localhost:12222/` returns "Bot OK"
 - **Dual MCP protocol support**:
   - **HTTP MCP**: 3 Node.js servers on ports 3001-3003 (Streamable HTTP, MCP 2024-11-05)
   - **Stdio MCP**: 1 Python server via stdin/stdout (JSON-RPC, MCP 2024-11-05)

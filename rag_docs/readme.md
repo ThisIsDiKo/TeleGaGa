@@ -92,7 +92,6 @@ src/main/kotlin/
 - Load configuration via ConfigService
 - Create HTTP client with disabled SSL verification (for GigaChat)
 - Initialize all services in correct order
-- Start Health Check server (port 12222)
 - Graceful shutdown on termination
 
 **System prompts:**
@@ -456,16 +455,7 @@ GigaChat client created
 ✅ All MCP servers started and connected
 ✅ MCP service initialized
 🕐 ReminderScheduler started
-Health Check server started on port 12222
 Telegram bot started and waiting for messages
-```
-
-### Health Check
-
-Check bot status:
-```bash
-curl http://localhost:12222/
-# Response: "Bot OK"
 ```
 
 ## Security
@@ -1806,7 +1796,6 @@ lsof -ti:3003 | xargs kill -9 2>/dev/null
 - Clean Architecture with layer separation
 - Thread-safe GigaChat token management via Mutex
 - Graceful shutdown
-- Health Check server on port 12222
 
 ### Day 11-13: MCP Integration (January 27-28, 2026)
 
@@ -1931,7 +1920,6 @@ val ragTopK: Int = 5
 - Thread-safe operations
 
 **Performance:**
-- Health check: instant
 - Vector search: 1-2 sec
 - RAG generation: 5-10 sec
 - MCP tool calling: 2-5 sec

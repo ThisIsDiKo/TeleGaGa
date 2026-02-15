@@ -1,0 +1,22 @@
+# VPS Deployment Configuration
+# Copy this file to deploy.properties and fill in your actual values
+# deploy.properties is git-ignored for security
+
+# SSH Connection
+ssh.host=your.server.com
+ssh.port=22
+ssh.user=username
+# Optional: path to SSH private key (if not using default ~/.ssh/id_rsa)
+# ssh.key=/path/to/private/key
+
+# Deployment Path
+# Directory on the server where the bot will be deployed
+deploy.path=/opt/telegaga
+
+# Systemd Service
+# Name of the systemd service
+service.name=telegaga
+
+# Java Path on Server
+# Path to Java 17+ on the remote server
+java.path=/usr/bin/java

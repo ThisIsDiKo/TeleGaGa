@@ -47,3 +47,4 @@ bin/
 ### Configuration ###
 config.properties
 *.properties
+!*.properties.example
