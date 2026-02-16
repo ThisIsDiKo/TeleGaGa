@@ -6,27 +6,19 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import ru.dikoresearch.domain.valueobjects.ChatId
-import ru.dikoresearch.domain.valueobjects.RagThreshold
-import ru.dikoresearch.domain.valueobjects.ReminderTime
+import ru.dikoresearch.domain.valueobjects.SystemPrompt
 import ru.dikoresearch.domain.valueobjects.Temperature
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Настройки чата с персистентным хранением
+ * Упрощенные настройки чата для мульти-модельного режима
  */
 @Serializable
 data class ChatSettings(
     val chatId: ChatId,
     val temperature: Temperature = Temperature.DEFAULT,
-    val reminderTime: ReminderTime? = null,
-    val reminderEnabled: Boolean = false,
-    val lastReminderSent: String? = null,    // ISO 8601 timestamp
-
-    // === RAG настройки ===
-    val ragRelevanceThreshold: RagThreshold = RagThreshold.MEDIUM,
-    val ragEnabled: Boolean = true,           // Включить/выключить RAG
-    val ragTopK: Int = 5                      // Количество кандидатов для reranking
+    val systemPrompt: SystemPrompt? = null  // null означает "использовать дефолтный промпт"
 )
 
 /**

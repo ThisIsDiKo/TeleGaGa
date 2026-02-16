@@ -1,20 +1,23 @@
 package ru.dikoresearch
 
-import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.java.KoinJavaComponent.get
 import ru.dikoresearch.di.*
-import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
-import org.koin.core.qualifier.named
 
 /**
- * Main entry point for TeleGaGa Telegram bot with Koin DI
- * Refactored from 448 lines to <100 lines using dependency injection
+ * Main entry point for TeleGaGa Multi-Model Ollama Bot
+ *
+ * Упрощенная версия с поддержкой трех моделей Ollama:
+ * - gemma3:1b
+ * - qwen3:1.7b
+ * - llama3.2:3b
+ *
+ * Без GigaChat, MCP, RAG, GitHub интеграции
  */
 fun main() {
-    println("=== Starting TeleGaGa Bot with Koin DI ===\n")
+    println("=== Starting TeleGaGa Multi-Model Ollama Bot ===\n")
 
     var botService: TelegramBotService? = null
 
@@ -26,7 +29,7 @@ fun main() {
                 configModule,
                 httpModule,
                 llmModule,
-                mcpModule,
+                multiModelModule,
                 persistenceModule,
                 domainModule,
                 commandModule,
@@ -35,37 +38,8 @@ fun main() {
         }
         println("   ✅ Koin DI container initialized\n")
 
-        // 2. Initialize MCP services
-        println("2. Initializing MCP services...")
-        runBlocking {
-            // Git MCP (Docker)
-            val gitMcp: StdioMcpService = get(StdioMcpService::class.java, named("gitMcp"))
-            try {
-                gitMcp.initialize()
-                println("   ✅ Git MCP Service initialized")
-            } catch (e: Exception) {
-                println("   ⚠️ Git MCP Service failed: ${e.message}")
-                e.printStackTrace()
-            }
-
-            // GitHub MCP (optional)
-            val githubMcp: StdioMcpService? = get(StdioMcpService::class.java, named("githubMcp"))
-            if (githubMcp != null) {
-                try {
-                    githubMcp.initialize()
-                    println("   ✅ GitHub MCP Service initialized")
-                } catch (e: Exception) {
-                    println("   ⚠️ GitHub MCP Service failed: ${e.message}")
-                    e.printStackTrace()
-                }
-            } else {
-                println("   ⚠️ GitHub MCP Service not configured (missing github.token)")
-            }
-        }
-        println()
-
-        // 3. Start Telegram Bot
-        println("3. Starting Telegram Bot...")
+        // 2. Start Telegram Bot
+        println("2. Starting Telegram Bot...")
         botService = get(TelegramBotService::class.java)
         botService?.start()
         println("   ✅ Telegram Bot started\n")

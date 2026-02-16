@@ -6,19 +6,15 @@ import java.io.FileOutputStream
 import java.util.Properties
 
 /**
- * Сервис для управления конфигурацией приложения
+ * Упрощенный сервис для управления конфигурацией приложения
  * Загружает параметры из файла config.properties
+ *
+ * Поддерживает только Ollama (без GigaChat, MCP, RAG, GitHub)
  */
 class ConfigService private constructor(
     val telegramToken: String,
-    val gigaChatAuthKey: String,
-    val gigaChatBaseUrl: String,
-    val gigaChatModel: String,
-    val ollamaChatModel: String,
-    val ollamaEmbeddingModel: String,
-    val githubToken: String?,
-    val githubOwner: String?,
-    val githubRepo: String?
+    val ollamaBaseUrl: String,
+    val ollamaEmbeddingModel: String
 ) {
     companion object {
         private const val CONFIG_FILE = "config.properties"
@@ -34,28 +30,14 @@ class ConfigService private constructor(
         fun load(): ConfigService {
             val properties = loadPropertiesWithPriority()
 
-            // Загружаем параметры
-            val externalConfig = File(CONFIG_FILE)
-
             // Извлекаем параметры
             val telegramToken = properties.getProperty("telegram.token")?.trim()
-            val gigaChatAuthKey = properties.getProperty("gigachat.authKey")?.trim()
-            val gigaChatBaseUrl = properties.getProperty("gigachat.baseUrl")?.trim()
-            val gigaChatModel = properties.getProperty("gigachat.model")?.trim()
-            val ollamaChatModel = properties.getProperty("ollama.chatModel")?.trim()
-            val ollamaEmbeddingModel = properties.getProperty("ollama.embeddingModel")?.trim()
-            val githubToken = properties.getProperty("github.token")?.trim()
-            val githubOwner = properties.getProperty("github.owner")?.trim()
-            val githubRepo = properties.getProperty("github.repo")?.trim()
+            val ollamaBaseUrl = properties.getProperty("ollama.baseUrl")?.trim() ?: "http://localhost:11434"
+            val ollamaEmbeddingModel = properties.getProperty("ollama.embeddingModel")?.trim() ?: "nomic-embed-text"
 
             // Валидация обязательных параметров
             val missingParams = mutableListOf<String>()
             if (telegramToken.isNullOrBlank()) missingParams.add("telegram.token")
-            if (gigaChatAuthKey.isNullOrBlank()) missingParams.add("gigachat.authKey")
-            if (gigaChatBaseUrl.isNullOrBlank()) missingParams.add("gigachat.baseUrl")
-            if (gigaChatModel.isNullOrBlank()) missingParams.add("gigachat.model")
-            if (ollamaChatModel.isNullOrBlank()) missingParams.add("ollama.chatModel")
-            if (ollamaEmbeddingModel.isNullOrBlank()) missingParams.add("ollama.embeddingModel")
 
             if (missingParams.isNotEmpty()) {
                 throw IllegalStateException(
@@ -70,14 +52,8 @@ class ConfigService private constructor(
 
             return ConfigService(
                 telegramToken = telegramToken!!,
-                gigaChatAuthKey = gigaChatAuthKey!!,
-                gigaChatBaseUrl = gigaChatBaseUrl!!,
-                gigaChatModel = gigaChatModel!!,
-                ollamaChatModel = ollamaChatModel!!,
-                ollamaEmbeddingModel = ollamaEmbeddingModel!!,
-                githubToken = githubToken,
-                githubOwner = githubOwner,
-                githubRepo = githubRepo
+                ollamaBaseUrl = ollamaBaseUrl,
+                ollamaEmbeddingModel = ollamaEmbeddingModel
             )
         }
 
@@ -118,12 +94,8 @@ class ConfigService private constructor(
                 |Instructions:
                 |1. Edit the file $CONFIG_FILE and fill in your values:
                 |   - telegram.token = your Telegram bot token
-                |   - gigachat.authKey = your GigaChat auth key
-                |   - gigachat.baseUrl = https://gigachat.devices.sberbank.ru
-                |   - gigachat.model = GigaChat
-                |   - github.token = (optional) your GitHub token
-                |   - github.owner = (optional) your GitHub username
-                |   - github.repo = (optional) your repository name
+                |   - ollama.baseUrl = http://localhost:11434 (default)
+                |   - ollama.embeddingModel = nomic-embed-text (default)
                 |2. Run the application again
                 |
                 |Note: config.properties is in .gitignore and won't be committed
@@ -157,17 +129,11 @@ class ConfigService private constructor(
             val properties = Properties()
 
             properties.setProperty("telegram.token", "")
-            properties.setProperty("gigachat.authKey", "")
-            properties.setProperty("gigachat.baseUrl", "https://gigachat.devices.sberbank.ru")
-            properties.setProperty("gigachat.model", "GigaChat")
-            properties.setProperty("ollama.chatModel", "llama3.2:3b")
+            properties.setProperty("ollama.baseUrl", "http://localhost:11434")
             properties.setProperty("ollama.embeddingModel", "nomic-embed-text")
-            properties.setProperty("github.token", "")
-            properties.setProperty("github.owner", "")
-            properties.setProperty("github.repo", "")
 
             FileOutputStream(templateFile).use { output ->
-                properties.store(output, "TeleGaGa Configuration Template - заполните параметры и сохраните как config.properties")
+                properties.store(output, "TeleGaGa Multi-Model Ollama Bot Configuration - заполните параметры и сохраните как config.properties")
             }
 
             println("Создан файл-шаблон конфигурации: $TEMPLATE_FILE")
@@ -178,14 +144,8 @@ class ConfigService private constructor(
         return """
             |ConfigService:
             |  telegramToken: ${telegramToken.take(10)}...
-            |  gigaChatAuthKey: ${gigaChatAuthKey.take(10)}...
-            |  gigaChatBaseUrl: $gigaChatBaseUrl
-            |  gigaChatModel: $gigaChatModel
-            |  ollamaChatModel: $ollamaChatModel
+            |  ollamaBaseUrl: $ollamaBaseUrl
             |  ollamaEmbeddingModel: $ollamaEmbeddingModel
-            |  githubToken: ${if (githubToken != null) "${githubToken.take(10)}..." else "not set"}
-            |  githubOwner: ${githubOwner ?: "not set"}
-            |  githubRepo: ${githubRepo ?: "not set"}
         """.trimMargin()
     }
 }

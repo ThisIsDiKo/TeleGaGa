@@ -4,7 +4,7 @@ import org.koin.dsl.module
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 
 /**
- * Koin module for Telegram bot service
+ * Koin module для Telegram bot service (упрощенный для мульти-модельного режима)
  */
 val telegramModule = module {
     single {
@@ -12,22 +12,19 @@ val telegramModule = module {
         TelegramBotService(
             telegramToken = config.telegramToken,
             commandRegistry = get(),
-            chatOrchestrator = get(),
+            multiModelOrchestrator = get(),
             settingsManager = get(),
-            embeddingService = get(),
             applicationScope = get(),
-            defaultSystemRole = getAssistantRole(),
-            gigaChatModel = config.gigaChatModel
+            defaultSystemRole = getDefaultSystemRole()
         )
     }
 }
 
 /**
- * Default assistant role system prompt
+ * Default system role для всех трех моделей
  */
-private fun getAssistantRole() = """
-You are a helpful assistant for the TeleGaGa project.
+private fun getDefaultSystemRole() = """
+You are a helpful assistant that answers user questions.
 
-Answer questions clearly and concisely in English.
-When documentation is provided, use it as your primary source of information.
+Provide clear, concise, and accurate responses.
 """.trimIndent()

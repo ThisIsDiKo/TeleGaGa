@@ -2,15 +2,14 @@ package ru.dikoresearch.application.commands.handlers
 
 import ru.dikoresearch.application.commands.CommandContext
 import ru.dikoresearch.application.commands.CommandHandler
-import ru.dikoresearch.domain.ChatOrchestrator
-import ru.dikoresearch.domain.valueobjects.ChatId
 import ru.dikoresearch.domain.valueobjects.SystemPrompt
+import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 
 /**
- * Handles the /changeRole command - updates the system prompt for a chat
+ * Handles the /changeRole command - updates the system prompt for all three models
  */
 class ChangeRoleCommandHandler(
-    private val chatOrchestrator: ChatOrchestrator
+    private val settingsManager: ChatSettingsManager
 ) : CommandHandler {
     override val commandName = "changeRole"
 
@@ -23,11 +22,14 @@ class ChangeRoleCommandHandler(
         }
 
         try {
-            chatOrchestrator.updateSystemRole(ChatId(context.chatId), SystemPrompt(newSystemRole))
-            context.sendMessage("Системный промпт изменен на:\n$newSystemRole")
+            val settings = settingsManager.loadSettings(context.chatId)
+            val updatedSettings = settings.copy(systemPrompt = SystemPrompt(newSystemRole))
+            settingsManager.saveSettings(context.chatId, updatedSettings)
+
+            context.sendMessage("✅ Системный промпт изменен для всех трех моделей:\n\n$newSystemRole")
             println("Системный промпт изменен для чата ${context.chatId}")
         } catch (e: Exception) {
-            context.sendMessage("Ошибка при изменении системного промпта: ${e.message}")
+            context.sendMessage("❌ Ошибка при изменении системного промпта: ${e.message}")
         }
     }
 }

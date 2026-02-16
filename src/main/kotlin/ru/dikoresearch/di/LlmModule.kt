@@ -2,51 +2,50 @@ package ru.dikoresearch.di
 
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
-import ru.dikoresearch.domain.llm.GigaChatLlmClient
-import ru.dikoresearch.domain.llm.LlmClient
-import ru.dikoresearch.domain.llm.OllamaLlmClient
-import ru.dikoresearch.infrastructure.http.GigaChatClient
 import ru.dikoresearch.infrastructure.http.OllamaClient
 
 /**
- * Koin module for LLM clients
+ * Упрощенный Koin module для трех Ollama клиентов
+ *
+ * Создает три отдельных клиента для:
+ * - gemma3:1b
+ * - qwen3:1.7b
+ * - llama3.2:3b
  */
 val llmModule = module {
-    // GigaChat concrete client
-    single {
-        val config = get<ru.dikoresearch.infrastructure.config.ConfigService>()
-        GigaChatClient(
-            httpClient = get(),
-            baseUrl = config.gigaChatBaseUrl,
-            authorizationKey = config.gigaChatAuthKey,
-            scope = "GIGACHAT_API_PERS"
-        )
-    }
-
-    // Ollama concrete client
-    single {
+    // Gemma3 1B client
+    single(named("gemma3")) {
         val config = get<ru.dikoresearch.infrastructure.config.ConfigService>()
         OllamaClient(
             httpClient = get(),
-            chatModel = config.ollamaChatModel,
+            chatModel = "gemma3:1b",
             embeddingModel = config.ollamaEmbeddingModel,
-            baseUrl = "http://localhost:11434",
+            baseUrl = config.ollamaBaseUrl,
             verbose = false
         )
     }
 
-    // LlmClient abstraction for GigaChat (default)
-    single<LlmClient>(named("gigachat")) {
-        GigaChatLlmClient(get())
+    // Qwen3 1.7B client
+    single(named("qwen3")) {
+        val config = get<ru.dikoresearch.infrastructure.config.ConfigService>()
+        OllamaClient(
+            httpClient = get(),
+            chatModel = "qwen3:1.7b",
+            embeddingModel = config.ollamaEmbeddingModel,
+            baseUrl = config.ollamaBaseUrl,
+            verbose = false
+        )
     }
 
-    // LlmClient abstraction for Ollama
-    single<LlmClient>(named("ollama")) {
-        OllamaLlmClient(get())
-    }
-
-    // Default LlmClient (GigaChat)
-    single<LlmClient> {
-        get(named("gigachat"))
+    // Llama3.2 3B client
+    single(named("llama3")) {
+        val config = get<ru.dikoresearch.infrastructure.config.ConfigService>()
+        OllamaClient(
+            httpClient = get(),
+            chatModel = "llama3.2:3b",
+            embeddingModel = config.ollamaEmbeddingModel,
+            baseUrl = config.ollamaBaseUrl,
+            verbose = false
+        )
     }
 }
