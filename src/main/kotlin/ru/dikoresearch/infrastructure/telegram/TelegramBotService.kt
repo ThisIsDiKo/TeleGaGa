@@ -20,14 +20,10 @@ import ru.dikoresearch.domain.valueobjects.SystemPrompt
 import ru.dikoresearch.infrastructure.persistence.ChatSettingsManager
 
 /**
- * Упрощенный Telegram Bot Service для мульти-модельного режима
+ * Telegram Bot Service
  *
- * Обрабатывает сообщения через три модели Ollama:
- * - gemma3:1b
- * - qwen3:1.7b
- * - llama3.2:3b
- *
- * Каждая модель отправляет ответ в отдельном сообщении
+ * Обрабатывает сообщения через Gemma3 (Ollama).
+ * Длинные ответы автоматически разбиваются на части по 4096 символов.
  */
 class TelegramBotService(
     private val telegramToken: String,
@@ -65,6 +61,53 @@ class TelegramBotService(
         if (::bot.isInitialized) {
             println("Telegram бот останавливается")
         }
+    }
+
+    /**
+     * Отправляет сообщение с Markdown. При ошибке парсинга (невалидный Markdown в тексте модели)
+     * повторяет отправку как plain text, чтобы сообщение точно дошло.
+     */
+    private fun sendSafe(chatId: Long, text: String) {
+        val result = bot.sendMessage(
+            chatId = ChatId.fromId(chatId),
+            text = text,
+            parseMode = ParseMode.MARKDOWN
+        )
+        if (result !is com.github.kotlintelegrambot.types.TelegramBotResult.Success) {
+            println("⚠️ Markdown send failed, retrying as plain text")
+            val plainText = text
+                .replace(Regex("""\*([^*]+)\*"""), "$1")
+                .replace(Regex("""_([^_]+)_"""), "$1")
+            bot.sendMessage(
+                chatId = ChatId.fromId(chatId),
+                text = plainText
+            )
+        }
+    }
+
+    /**
+     * Разбивает текст на части, не превышающие лимит Telegram (4096 символов).
+     * Разбивка происходит по ближайшему символу новой строки.
+     * Оставляем запас ~100 символов для заголовка/футера.
+     */
+    private fun splitMessage(text: String, maxLength: Int = 3996): List<String> {
+        if (text.length <= maxLength) return listOf(text)
+
+        val chunks = mutableListOf<String>()
+        var remaining = text
+
+        while (remaining.length > maxLength) {
+            val splitIndex = remaining.lastIndexOf('\n', maxLength)
+            val actualSplitIndex = if (splitIndex > 0) splitIndex else maxLength
+            chunks.add(remaining.substring(0, actualSplitIndex))
+            remaining = remaining.substring(actualSplitIndex).trimStart('\n')
+        }
+
+        if (remaining.isNotEmpty()) {
+            chunks.add(remaining)
+        }
+
+        return chunks
     }
 
     /**
@@ -125,8 +168,6 @@ class TelegramBotService(
 
     /**
      * Настройка обработчиков текстовых сообщений
-     *
-     * Отправляет сообщение всем трем моделям и получает три ответа
      */
     private fun Dispatcher.setupMessageHandlers() {
         message(filter = Filter.Text) {
@@ -156,26 +197,32 @@ class TelegramBotService(
 
                     println("📥 Received ${responses.size} responses")
 
-                    // Отправляем ответ от каждой модели в отдельном сообщении
+                    // Отправляем ответ от каждой модели, разбивая на части при необходимости
                     responses.forEach { response ->
-                        // Добавляем небольшую задержку между сообщениями (защита от rate limiting)
                         delay(100)
 
-                        val responseText = buildString {
-                            appendLine("*${response.modelName}*")
-                            appendLine()
-                            appendLine(response.content)
-                            appendLine()
-                            appendLine("_⏱ ${response.generationTimeMs}ms_")
+                        val chunks = splitMessage(response.content)
+
+                        chunks.forEachIndexed { index, chunk ->
+                            if (index > 0) delay(100)
+
+                            val messageText = buildString {
+                                if (index == 0) {
+                                    appendLine("*${response.modelName}*")
+                                    appendLine()
+                                }
+                                append(chunk)
+                                if (index == chunks.lastIndex) {
+                                    appendLine()
+                                    appendLine()
+                                    append("_⏱ ${response.generationTimeMs}ms_")
+                                }
+                            }
+
+                            sendSafe(chatId, messageText)
                         }
 
-                        bot.sendMessage(
-                            chatId = ChatId.fromId(chatId),
-                            text = responseText,
-                            parseMode = ParseMode.MARKDOWN
-                        )
-
-                        println("✅ Sent response from ${response.modelName}")
+                        println("✅ Sent response from ${response.modelName} (${chunks.size} parts)")
                     }
 
                 } catch (e: Exception) {

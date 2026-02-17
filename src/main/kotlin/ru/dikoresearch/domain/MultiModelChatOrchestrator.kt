@@ -18,29 +18,20 @@ data class ModelResponse(
 )
 
 /**
- * Мульти-модельный оркестратор для одновременной работы с тремя моделями Ollama
- *
- * Управляет тремя моделями:
- * - gemma3:1b
- * - qwen3:1.7b
- * - llama3.2:3b
- *
- * Каждая модель хранит свою историю отдельно
+ * Оркестратор для работы с моделью Gemma3
  */
 class MultiModelChatOrchestrator(
     private val gemma3Client: OllamaClient,
-    private val qwen3Client: OllamaClient,
-    private val llama3Client: OllamaClient,
     private val historyManager: ChatHistoryManager
 ) {
     /**
-     * Обрабатывает сообщение пользователя через все три модели последовательно
+     * Обрабатывает сообщение пользователя через Gemma3
      *
      * @param chatId идентификатор чата
      * @param userMessage текст сообщения пользователя
      * @param systemRole системный промпт
      * @param temperature температура генерации (0.0 - 1.0)
-     * @return список ответов от каждой модели
+     * @return список ответов от модели
      */
     suspend fun processMessage(
         chatId: ChatId,
@@ -48,10 +39,7 @@ class MultiModelChatOrchestrator(
         systemRole: SystemPrompt,
         temperature: Temperature
     ): List<ModelResponse> {
-        val responses = mutableListOf<ModelResponse>()
-
-        // Обрабатываем каждую модель последовательно
-        responses.add(processWithModel(
+        return listOf(processWithModel(
             model = OllamaModel.GEMMA3,
             client = gemma3Client,
             chatId = chatId,
@@ -59,26 +47,6 @@ class MultiModelChatOrchestrator(
             systemRole = systemRole,
             temperature = temperature
         ))
-
-        responses.add(processWithModel(
-            model = OllamaModel.QWEN3,
-            client = qwen3Client,
-            chatId = chatId,
-            userMessage = userMessage,
-            systemRole = systemRole,
-            temperature = temperature
-        ))
-
-        responses.add(processWithModel(
-            model = OllamaModel.LLAMA3,
-            client = llama3Client,
-            chatId = chatId,
-            userMessage = userMessage,
-            systemRole = systemRole,
-            temperature = temperature
-        ))
-
-        return responses
     }
 
     /**
@@ -142,7 +110,7 @@ class MultiModelChatOrchestrator(
     }
 
     /**
-     * Очищает историю для всех трех моделей
+     * Очищает историю Gemma3
      */
     fun clearHistory(chatId: ChatId): Boolean {
         return historyManager.clearAllHistories(chatId.value)

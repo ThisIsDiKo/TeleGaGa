@@ -12,8 +12,6 @@ val multiModelModule = module {
     single {
         MultiModelChatOrchestrator(
             gemma3Client = get<OllamaClient>(named("gemma3")),
-            qwen3Client = get<OllamaClient>(named("qwen3")),
-            llama3Client = get<OllamaClient>(named("llama3")),
             historyManager = get()
         )
     }

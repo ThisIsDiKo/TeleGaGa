@@ -9,9 +9,7 @@ import java.io.File
  * Модели Ollama для мульти-модельного режима
  */
 enum class OllamaModel(val filename: String, val displayName: String) {
-    GEMMA3("gemma3", "Gemma3 1B"),
-    QWEN3("qwen3", "Qwen3 1.7B"),
-    LLAMA3("llama3", "Llama3.2 3B")
+    GEMMA3("gemma3", "Gemma3 1B")
 }
 
 /**
@@ -166,7 +164,7 @@ class ChatHistoryManager(
     }
 
     /**
-     * Очищает историю для всех трех моделей
+     * Очищает историю для всех моделей
      */
     fun clearAllHistories(chatId: Long): Boolean {
         val results = OllamaModel.values().map { model ->

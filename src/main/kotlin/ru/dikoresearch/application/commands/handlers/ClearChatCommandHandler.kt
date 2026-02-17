@@ -18,7 +18,7 @@ class ClearChatCommandHandler(
             val cleared = multiModelOrchestrator.clearHistory(ChatId(context.chatId))
 
             if (cleared) {
-                context.sendMessage("✅ История очищена для всех трех моделей (Gemma3, Qwen3, Llama3). Начнем с чистого листа!")
+                context.sendMessage("✅ История очищена. Начнем с чистого листа!")
                 println("История очищена для чата ${context.chatId}")
             } else {
                 context.sendMessage("⚠️ История для этого чата уже пуста")
