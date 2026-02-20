@@ -78,7 +78,7 @@ class MultiModelChatOrchestrator(
 
         // 5. Вызываем модель
         val response = try {
-            client.chatCompletion(messages = history)
+            client.chatCompletion(messages = history, temperature = temperature.value)
         } catch (e: Exception) {
             println("Ошибка при обращении к модели ${model.displayName}: ${e.message}")
             e.printStackTrace()

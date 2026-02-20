@@ -5,6 +5,7 @@ import OllamaChatRequest
 import OllamaChatResponse
 import OllamaEmbeddingRequest
 import OllamaEmbeddingResponse
+import OllamaOptions
 import io.ktor.client.HttpClient
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -25,12 +26,14 @@ class OllamaClient(
 
     suspend fun chatCompletion(
         messages: List<GigaChatMessage>,
+        temperature: Float? = null
     ): OllamaChatResponse {
 
         val requestBody = OllamaChatRequest(
             model = chatModel,
             messages = messages,
-            stream = false
+            stream = false,
+            options = if (temperature != null) OllamaOptions(temperature = temperature) else null
         )
 
         if (verbose) {

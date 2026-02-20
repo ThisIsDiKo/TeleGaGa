@@ -1,10 +1,21 @@
 import kotlinx.serialization.Serializable
 
+/**
+ * Опции для Ollama API (temperature и другие параметры)
+ */
+@Serializable
+data class OllamaOptions(
+    val temperature: Float? = null,
+    val top_p: Float? = null,
+    val top_k: Int? = null
+)
+
 @Serializable
 data class OllamaChatRequest(
     val model: String,
     val messages: List<GigaChatMessage>,
-    val stream: Boolean
+    val stream: Boolean,
+    val options: OllamaOptions? = null
 )
 
 @Serializable
