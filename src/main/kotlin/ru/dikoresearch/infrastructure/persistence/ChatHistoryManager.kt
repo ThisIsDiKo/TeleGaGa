@@ -9,7 +9,8 @@ import java.io.File
  * Модели Ollama для мульти-модельного режима
  */
 enum class OllamaModel(val filename: String, val displayName: String) {
-    GEMMA3("gemma3", "Gemma3 1B")
+    QWEN25("qwen25", "Qwen 2.5 1.5B"),
+    GEMMA3("gemma3", "Gemma3 1B")  // legacy
 }
 
 /**

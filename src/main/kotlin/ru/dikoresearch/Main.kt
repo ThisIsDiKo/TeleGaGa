@@ -1,25 +1,22 @@
 package ru.dikoresearch
 
+import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
+import org.koin.core.qualifier.named
 import org.koin.java.KoinJavaComponent.get
 import ru.dikoresearch.di.*
+import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 
 /**
- * Main entry point for TeleGaGa Multi-Model Ollama Bot
- *
- * Упрощенная версия с поддержкой трех моделей Ollama:
- * - gemma3:1b
- * - qwen3:1.7b
- * - llama3.2:3b
- *
- * Без GigaChat, MCP, RAG, GitHub интеграции
+ * Main entry point for TeleGaGa Bot with Qwen 2.5 1.5B + MCP artifacts analysis
  */
 fun main() {
-    println("=== Starting TeleGaGa Multi-Model Ollama Bot ===\n")
+    println("=== Starting TeleGaGa Qwen2.5 + Artifacts Bot ===\n")
 
     var botService: TelegramBotService? = null
+    var artifactsMcp: StdioMcpService? = null
 
     try {
         // 1. Initialize Koin DI container
@@ -38,8 +35,14 @@ fun main() {
         }
         println("   ✅ Koin DI container initialized\n")
 
-        // 2. Start Telegram Bot
-        println("2. Starting Telegram Bot...")
+        // 2. Initialize MCP artifacts server
+        println("2. Initializing MCP artifacts server...")
+        artifactsMcp = get<StdioMcpService>(StdioMcpService::class.java, named("artifactsMcp"))
+        runBlocking { artifactsMcp.initialize() }
+        println("   ✅ MCP artifacts server ready\n")
+
+        // 3. Start Telegram Bot
+        println("3. Starting Telegram Bot...")
         botService = get(TelegramBotService::class.java)
         botService?.start()
         println("   ✅ Telegram Bot started\n")
@@ -71,6 +74,10 @@ fun main() {
         println("\n❌ Application error: ${e.message}")
     } finally {
         println("\n=== Graceful shutdown ===")
+
+        // Stop MCP servers
+        artifactsMcp?.let { runBlocking { it.shutdown() } }
+        println("✅ MCP artifacts server stopped")
 
         // Stop Telegram bot
         botService?.stop()

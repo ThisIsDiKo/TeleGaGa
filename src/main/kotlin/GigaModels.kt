@@ -1,3 +1,5 @@
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -11,13 +13,19 @@ data class AIChallengeResponse(
     val answer: String
 )
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class GigaChatMessage(
     val role: String,
     val content: String = "",
     @SerialName("function_call")
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
     val functionCall: GigaChatFunctionCall? = null,
-    val name: String? = null  // For function role
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val name: String? = null,  // For function role
+    @SerialName("tool_calls")
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val toolCalls: List<OllamaToolCall>? = null  // For Ollama tool calling
 )
 
 @Serializable
