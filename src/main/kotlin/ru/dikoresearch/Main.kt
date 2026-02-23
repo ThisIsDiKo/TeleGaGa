@@ -1,13 +1,10 @@
 package ru.dikoresearch
 
-import kotlinx.coroutines.runBlocking
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
 import org.koin.java.KoinJavaComponent.get
 import ru.dikoresearch.di.*
-import ru.dikoresearch.infrastructure.mcp.StdioMcpService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
-import org.koin.core.qualifier.named
 
 /**
  * Main entry point for TeleGaGa Telegram bot with Koin DI
@@ -35,36 +32,7 @@ fun main() {
         }
         println("   ✅ Koin DI container initialized\n")
 
-        // 2. Initialize MCP services
-        println("2. Initializing MCP services...")
-        runBlocking {
-            // Git MCP (Docker)
-            val gitMcp: StdioMcpService = get(StdioMcpService::class.java, named("gitMcp"))
-            try {
-                gitMcp.initialize()
-                println("   ✅ Git MCP Service initialized")
-            } catch (e: Exception) {
-                println("   ⚠️ Git MCP Service failed: ${e.message}")
-                e.printStackTrace()
-            }
-
-            // GitHub MCP (optional)
-            val githubMcp: StdioMcpService? = get(StdioMcpService::class.java, named("githubMcp"))
-            if (githubMcp != null) {
-                try {
-                    githubMcp.initialize()
-                    println("   ✅ GitHub MCP Service initialized")
-                } catch (e: Exception) {
-                    println("   ⚠️ GitHub MCP Service failed: ${e.message}")
-                    e.printStackTrace()
-                }
-            } else {
-                println("   ⚠️ GitHub MCP Service not configured (missing github.token)")
-            }
-        }
-        println()
-
-        // 3. Start Telegram Bot
+        // 2. Start Telegram Bot
         println("3. Starting Telegram Bot...")
         botService = get(TelegramBotService::class.java)
         botService?.start()

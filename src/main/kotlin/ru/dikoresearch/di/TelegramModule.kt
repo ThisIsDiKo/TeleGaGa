@@ -1,6 +1,7 @@
 package ru.dikoresearch.di
 
 import org.koin.dsl.module
+import ru.dikoresearch.infrastructure.config.UserProfileService
 import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 
 /**
@@ -9,6 +10,7 @@ import ru.dikoresearch.infrastructure.telegram.TelegramBotService
 val telegramModule = module {
     single {
         val config = get<ru.dikoresearch.infrastructure.config.ConfigService>()
+        val userProfile = get<UserProfileService>()
         TelegramBotService(
             telegramToken = config.telegramToken,
             commandRegistry = get(),
@@ -16,18 +18,34 @@ val telegramModule = module {
             settingsManager = get(),
             embeddingService = get(),
             applicationScope = get(),
-            defaultSystemRole = getAssistantRole(),
+            defaultSystemRole = buildAssistantRole(userProfile),
             gigaChatModel = config.gigaChatModel
         )
     }
 }
 
 /**
- * Default assistant role system prompt
+ * Builds the default assistant system prompt, injecting user profile if configured.
  */
-private fun getAssistantRole() = """
-You are a helpful assistant for the TeleGaGa project.
+private fun buildAssistantRole(profile: UserProfileService): String {
+    val profileBlock = profile.toSystemPromptBlock()
+    val languageHint = if (profile.language.isNotBlank()) {
+        "Always respond in ${profile.language}."
+    } else {
+        "Answer in Russian by default unless the user writes in another language."
+    }
 
-Answer questions clearly and concisely in English.
-When documentation is provided, use it as your primary source of information.
-""".trimIndent()
+    return buildString {
+        appendLine("You are a personal AI assistant.")
+        appendLine()
+        if (profileBlock.isNotBlank()) {
+            appendLine(profileBlock)
+            appendLine()
+        }
+        appendLine(languageHint)
+        appendLine("Be concise and specific. When documentation is provided, use it as the primary source of information.")
+        if (profile.name.isNotBlank()) {
+            appendLine("Address the user as ${profile.name}.")
+        }
+    }.trimEnd()
+}

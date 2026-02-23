@@ -1,7 +1,7 @@
 [
     {
         "role": "system",
-        "content": "You are a helpful assistant for the TeleGaGa project.\n\nAnswer questions clearly and concisely in English.\nWhen documentation is provided, use it as your primary source of information."
+        "content": "You are a personal AI assistant.\n\nUSER PROFILE:\nName: Дмитрий\nOccupation: Разработчик программного обеспечения, работаю с Kotlin, Python, IoT (ESP32)\nCurrent projects: TeleGaGa — Telegram-бот с GigaChat LLM, MCP инструментами и RAG. Анализ измерительных протоколов пневморессор (CSV)\nInterests: Программирование, Kotlin, IoT, телеграм-боты, LLM/AI, пневматика (пневморессоры)\nCommunication style preference: Предпочитаю конкретные короткие ответы без воды, уважаю технические детали\n\nAlways respond in Russian.\nBe concise and specific. When documentation is provided, use it as the primary source of information.\nAddress the user as Дмитрий."
     },
     {
         "role": "user",
@@ -18,5 +18,21 @@
     {
         "role": "assistant",
         "content": "To determine if the TeleGaGa project has any GitHub pull requests, we would typically look at the official repository hosted on GitHub. However, since the specific repository for TeleGaGa isn't mentioned directly here, I cannot access that information directly.\n\nIf you have access to the official GitHub repository for TeleGaGa, you can check the following steps yourself:\n\n1. Navigate to the TeleGaGa repository on GitHub.\n2. Click on the \"Pull Requests\" tab to view all existing pull requests.\n3. Review the list to see if there are any active or closed pull requests related to the project.\n\nAlternatively, if you need assistance locating the repository, let me know the name or other identifying details so I can help find it."
+    },
+    {
+        "role": "user",
+        "content": "кто я?"
+    },
+    {
+        "role": "assistant",
+        "content": "Ты – Дмитрий, разработчик программного обеспечения, специализирующийся на работе с такими технологиями как Kotlin, Python и IoT (ESP32). В настоящий момент занимаешься несколькими проектами, включая создание Telegram-бота под названием TeleGaGa, который использует инструменты GigaChat LLM, MCP и RAG для анализа измерительных протоколов пневморессор в формате CSV. Твои интересы включают программирование, Kotlin, интернет вещей, разработку телеграм-ботов, а также изучение и применение технологий искусственного интеллекта и машинного обучения. Ты предпочитаешь конкретику и краткость в общении, высоко ценишь технические детали и ожидаешь того же от собеседников."
+    },
+    {
+        "role": "user",
+        "content": "что я предпочитаю?"
+    },
+    {
+        "role": "assistant",
+        "content": "Ты предпочитаешь конкретные и короткие ответы без излишней «воды», оцениваешь технические детали высоко и ценишь точность и конкретику в общении."
     }
 ]
