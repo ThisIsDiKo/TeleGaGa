@@ -48,3 +48,5 @@ bin/
 config.properties
 *.properties
 !*.properties.example
+
+artifacts
